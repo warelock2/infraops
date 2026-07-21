@@ -254,6 +254,78 @@
         name: haproxy
         state: restarted
 
+- name: Create API DNS entry for cluster endpoint
+  hosts: localhost
+  gather_facts: no
+  connection: local
+  vars:
+    _cluster_name: "{{ hostvars[groups['k8s_control'][0]]['cluster_name'] }}"
+  tasks:
+    - name: Read infrastructure.yaml
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/../../config/infrastructure.yaml"
+      register: infra_raw
+
+    - name: Parse infrastructure.yaml
+      ansible.builtin.set_fact:
+        infra: "{{ infra_raw.content | b64decode | from_yaml }}"
+
+    - name: Find cluster VIP
+      ansible.builtin.set_fact:
+        _cluster: "{{ infra.clusters | selectattr('name', 'equalto', _cluster_name) | first }}"
+        _dns_domain: "{{ infra.platform.proxmox.dns_domain }}"
+
+    - name: Find docker host and vault port
+      ansible.builtin.set_fact:
+        _docker_host: "{{ infra.hosts | selectattr('name', 'equalto', 'docker') | first }}"
+        _vault_port: "{{ (infra.services.instances.vault | first).port }}"
+
+    - name: Set vault URL
+      ansible.builtin.set_fact:
+        _vault_url: "https://{{ _docker_host.connection.host }}:{{ _vault_port }}"
+
+    - name: Get pfSense API key from Vault
+      community.hashi_vault.vault_kv2_get:
+        url: "{{ _vault_url }}"
+        path: infraops/pfsense
+        validate_certs: false
+      register: vault_pfsense
+
+    - name: Find DNS server host
+      ansible.builtin.set_fact:
+        _dns_host: "{{ infra.hosts | selectattr('services', 'defined') | selectattr('services', 'contains', 'dns') | first }}"
+        _ip_pool: "{{ infra.hosts | selectattr('services', 'defined') | selectattr('services', 'contains', 'dns') | first }}"
+
+    - name: Generate IP pool list
+      ansible.builtin.set_fact:
+        _ip_list: "{{ range(_ip_pool.ip_pool.start.split('.')[-1] | int, _ip_pool.ip_pool.end.split('.')[-1] | int + 1) | map('string') | map('regex_replace', '^(.*)', _ip_base ~ '.\\1') | list }}"
+      vars:
+        _ip_base: "{{ _ip_pool.ip_pool.start.split('.')[:3] | join('.') }}"
+
+    - name: Retrieve all DNS Resolver Host Overrides
+      pfrest.pfsense.services_dns_resolver_host_overrides_info:
+        api_host: "{{ _dns_host.connection.host }}"
+        api_key: "{{ vault_pfsense.secret.api_key }}"
+        api_protocol: https
+        validate_certs: false
+      register: dns_result
+
+    - name: Set pool overrides fact
+      ansible.builtin.set_fact:
+        pfsense_host: "{{ _dns_host.connection.host }}"
+        pfsense_api_key: "{{ vault_pfsense.secret.api_key }}"
+        ip_pool: "{{ _ip_pool.ip_pool }}"
+        ip_list: "{{ _ip_list }}"
+        pool_overrides: "{{ dns_result.data | selectattr('ip', 'defined') | selectattr('ip.0', 'in', _ip_list) | list | sort(attribute='ip') }}"
+
+    - name: Create API DNS entry
+      ansible.builtin.include_tasks: tasks/add-host.yaml
+      vars:
+        target_item:
+          hostname: "k8s-{{ _cluster_name }}-api"
+          domain: "{{ _dns_domain }}"
+          ip: "{{ _cluster.control_plane.vip }}"
+
 - name: K8s control plane init
   hosts: k8s_control
   become: yes
@@ -507,75 +579,3 @@
             - apiGroup: rbac.authorization.k8s.io
               kind: Group
               name: "{{ cluster_name }}-viewers"
-
-- name: Create API DNS entry for cluster endpoint
-  hosts: localhost
-  gather_facts: no
-  connection: local
-  vars:
-    _cluster_name: "{{ hostvars[groups['k8s_control'][0]]['cluster_name'] }}"
-  tasks:
-    - name: Read infrastructure.yaml
-      ansible.builtin.slurp:
-        src: "{{ playbook_dir }}/../../config/infrastructure.yaml"
-      register: infra_raw
-
-    - name: Parse infrastructure.yaml
-      ansible.builtin.set_fact:
-        infra: "{{ infra_raw.content | b64decode | from_yaml }}"
-
-    - name: Find cluster VIP
-      ansible.builtin.set_fact:
-        _cluster: "{{ infra.clusters | selectattr('name', 'equalto', _cluster_name) | first }}"
-        _dns_domain: "{{ infra.platform.proxmox.dns_domain }}"
-
-    - name: Find docker host and vault port
-      ansible.builtin.set_fact:
-        _docker_host: "{{ infra.hosts | selectattr('name', 'equalto', 'docker') | first }}"
-        _vault_port: "{{ (infra.services.instances.vault | first).port }}"
-
-    - name: Set vault URL
-      ansible.builtin.set_fact:
-        _vault_url: "https://{{ _docker_host.connection.host }}:{{ _vault_port }}"
-
-    - name: Get pfSense API key from Vault
-      community.hashi_vault.vault_kv2_get:
-        url: "{{ _vault_url }}"
-        path: infraops/pfsense
-        validate_certs: false
-      register: vault_pfsense
-
-    - name: Find DNS server host
-      ansible.builtin.set_fact:
-        _dns_host: "{{ infra.hosts | selectattr('services', 'defined') | selectattr('services', 'contains', 'dns') | first }}"
-        _ip_pool: "{{ infra.hosts | selectattr('services', 'defined') | selectattr('services', 'contains', 'dns') | first }}"
-
-    - name: Generate IP pool list
-      ansible.builtin.set_fact:
-        _ip_list: "{{ range(_ip_pool.ip_pool.start.split('.')[-1] | int, _ip_pool.ip_pool.end.split('.')[-1] | int + 1) | map('string') | map('regex_replace', '^(.*)', _ip_base ~ '.\\1') | list }}"
-      vars:
-        _ip_base: "{{ _ip_pool.ip_pool.start.split('.')[:3] | join('.') }}"
-
-    - name: Retrieve all DNS Resolver Host Overrides
-      pfrest.pfsense.services_dns_resolver_host_overrides_info:
-        api_host: "{{ _dns_host.connection.host }}"
-        api_key: "{{ vault_pfsense.secret.api_key }}"
-        api_protocol: https
-        validate_certs: false
-      register: dns_result
-
-    - name: Set pool overrides fact
-      ansible.builtin.set_fact:
-        pfsense_host: "{{ _dns_host.connection.host }}"
-        pfsense_api_key: "{{ vault_pfsense.secret.api_key }}"
-        ip_pool: "{{ _ip_pool.ip_pool }}"
-        ip_list: "{{ _ip_list }}"
-        pool_overrides: "{{ dns_result.data | selectattr('ip', 'defined') | selectattr('ip.0', 'in', _ip_list) | list | sort(attribute='ip') }}"
-
-    - name: Create API DNS entry
-      ansible.builtin.include_tasks: tasks/add-host.yaml
-      vars:
-        target_item:
-          hostname: "k8s-{{ _cluster_name }}-api"
-          domain: "{{ _dns_domain }}"
-          ip: "{{ _cluster.control_plane.vip }}"
