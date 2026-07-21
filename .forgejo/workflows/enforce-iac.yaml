@@ -128,3 +128,55 @@ jobs:
           VAULT_ADDR: https://docker.localdomain:8200
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+
+      - name: K8s Generate Inventory
+        if: github.ref == 'refs/heads/master'
+        uses: docker://alpine/ansible:latest
+        with:
+          args: >
+            sh -c "apk add --no-cache -q curl unzip yq &&
+            TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
+            curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
+            unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
+            cd terraform &&
+            terraform init -reconfigure &&
+            terraform output -json ansible_inventory > ../ansible/inventory.json"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          VAULT_ADDR: https://docker.localdomain:8200
+          VAULT_SKIP_VERIFY: "true"
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+
+      - name: K8s Cluster Bootstrap
+        if: github.ref == 'refs/heads/master'
+        uses: docker://alpine/ansible:latest
+        with:
+          args: >
+            sh -c 'apk add -q yq py3-pip &&
+            pip3 install -q --break-system-packages --root-user-action=ignore hvac &&
+            ansible-galaxy collection install
+            kubernetes.core community.general ansible.posix
+            community.hashi_vault pfrest.pfsense --force &&
+            if [ -z "$ADMIN_SSH_PUBLIC_KEY" ]; then echo "ERROR: ADMIN_SSH_PUBLIC_KEY not set" && exit 1; fi &&
+            if [ -z "$ANSIBLE_SSH_PRIVATE_KEY" ]; then echo "ERROR: ANSIBLE_SSH_PRIVATE_KEY not set" && exit 1; fi &&
+            echo "$ADMIN_SSH_PUBLIC_KEY" > /tmp/ssh_key.pub &&
+            echo "$ANSIBLE_SSH_PRIVATE_KEY" > /tmp/ansible_key &&
+            chmod 600 /tmp/ansible_key &&
+            export ANSIBLE_CONFIG=$PWD/ansible/ansible.cfg &&
+            SERVICE_HOST=$(yq .defaults.service_host config/infrastructure.yaml) &&
+            DNS_DOMAIN=$(yq .platform.proxmox.dns_domain config/infrastructure.yaml) &&
+            SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}" &&
+            ansible-playbook -i ansible/inventory.json ansible/playbooks/k8s-cluster.yaml
+            --private-key /tmp/ansible_key
+            -e infra_platform_kubernetes_version=$(yq .platform.kubernetes.version config/infrastructure.yaml)
+            -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr config/infrastructure.yaml)
+            -e infra_platform_kubernetes_calico_version=$(yq .platform.kubernetes.calico_version config/infrastructure.yaml)
+            -e infra_service_domain=$SERVICE_DOMAIN
+            -e infra_admin_user=$(yq .platform.admin.user config/infrastructure.yaml)
+            -e infra_admin_group=$(yq .platform.admin.group config/infrastructure.yaml)
+            -e infra_ssh_key_file=/tmp/ssh_key.pub'
+        env:
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+          ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
