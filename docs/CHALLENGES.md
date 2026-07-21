@@ -1,0 +1,47 @@
+# Challenges
+
+Major problems we hit building this infrastructure and how we solved them.
+
+## DHCP doesn't register hostnames in DNS
+
+Proxmox assigns IPs via DHCP but the router's DHCP doesn't create DNS records. We need DNS resolution for Terraform's `wait_for_connection` and Ansible inventory. **Solution:** Manage static IPs directly in pfSense Unbound DNS via REST API. Terraform allocates IPs from a defined pool, creates DNS records, and VMs get static IPs via cloud-init.
+
+## Terraform creates VMs before Ansible can connect
+
+VMs boot and cloud-init runs, but SSH isn't ready when Terraform's `wait_for_connection` returns. Ansible fails with connection refused. **Solution:** Mandatory 5-minute sleep after Terraform apply to let cloud-init finish. `wait_for_connection` retries SSH with a 600-second timeout.
+
+## Netplan apply fails during early boot
+
+Cloud-init writes netplan config but the interface rename (`ens18` → `eth0`) fails with `[busy]` error during the DHCP race window. **Solution:** Added `netplan apply` to cloud-init's `runcmd` section, after qemu-guest-agent starts. By runcmd time the busy condition has cleared.
+
+## Cloud-init `power_state` causes problems
+
+Putting `power_state` in cloud-init to reboot after setup causes reboot loops and timing issues. **Solution:** Removed `power_state` from the cloud-init snippet entirely. Reboot is handled separately by Ansible when needed.
+
+## pfREST Ansible collection has bugs
+
+`lookup_object()` throws "matched multiple existing objects" because query params don't filter. `delete_object()` sends ID in JSON body but the API expects it in the URL path. **Solution:** Use `ansible.builtin.uri` with DELETE to the plural endpoint plus query parameters. Proven to work reliably.
+
+## Golden image approach was fragile
+
+Initially built custom VM images with `virt-customize`. Templates broke across Proxmox versions and were hard to maintain. **Solution:** Use stock Ubuntu 26.04 cloud images with Proxmox-native cloud-init. Simpler, more portable, easier to update.
+
+## VIP as IP breaks TLS and kubectl
+
+Using the VIP IP directly in Terraform's `cp_endpoint` works but `kubectl` can't verify TLS certificates. **Solution:** Changed `cp_endpoint` to use DNS hostname (`k8s-{name}-api.{domain}:6443`). Keepalived handles VIP failover, DNS resolves to the active node.
+
+## Ansible collection version conflicts
+
+System-wide `ansible` and project venv `ansible` had different collection versions. `pfsensible.core` conflicted with `pfrest.pfsense`. **Solution:** All project Python dependencies go into `.venv/` within the project directory. Never install system-wide or user-level packages.
+
+## Vault tokens in files are a liability
+
+Writing Vault tokens to `~/.vault-token` means secrets on disk. CI needs tokens but can't store files. **Solution:** Pass tokens via `VAULT_TOKEN` environment variable only. Read-only token for CI, read-write token for local use. No file-based tokens anywhere.
+
+## Cloud-init status --wait returns rc=2
+
+`cloud-init status --wait` returns exit code 2 when done with warnings (status: done). Ansible treats this as failure. **Solution:** Added `failed_when: false` to the task. Cloud-init completed successfully, the warnings are non-critical.
+
+## DNS resolver changes need explicit apply
+
+Creating or deleting host overrides via pfSense REST API stages changes but doesn't commit them. Unbound continues serving old records. **Solution:** Must call `pfrest.pfsense.services_dns_resolver_apply` after every create/delete operation to commit changes.

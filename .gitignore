@@ -1,0 +1,40 @@
+.venv/
+
+RESTART.md
+
+#cloudimg/*
+#!cloudimg/.gitkeep
+
+*.bak
+
+# Artifacts created by running opencode in docker
+.bun
+.cache
+.config
+.local
+.npm
+
+terraform/secrets.auto.tfvars
+terraform/terraform.tfvars
+
+# Junk files from manually running Terraform
+*.tfstate
+*.tfstate.*
+.wget-hsts
+.env
+
+.ansible/
+
+# Generated artifacts
+infra.drawio
+__pycache__/
+*.pyc
+typescript
+
+# SSH keys
+id_rsa*
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+!terraform/.terraform.lock.hcl

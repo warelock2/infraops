@@ -1,0 +1,44 @@
+---
+- name: Ensure pfSense REST API is installed and configured
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Read infrastructure.yaml
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/../../config/infrastructure.yaml"
+      register: infra_raw
+
+    - name: Parse infrastructure.yaml
+      ansible.builtin.set_fact:
+        infra: "{{ infra_raw.content | b64decode | from_yaml }}"
+
+    - name: Find docker host entry
+      ansible.builtin.set_fact:
+        docker_host: "{{ infra.hosts | selectattr('name', 'equalto', 'docker') | first }}"
+
+    - name: Find vault service port
+      ansible.builtin.set_fact:
+        vault_port: "{{ (infra.services.instances.vault | first).port }}"
+
+    - name: Set vault URL
+      ansible.builtin.set_fact:
+        vault_url: "https://{{ docker_host.connection.host }}:{{ vault_port }}"
+
+    - name: Get pfSense API key from Vault
+      community.hashi_vault.vault_kv2_get:
+        url: "{{ vault_url }}"
+        path: infraops/pfsense
+        validate_certs: false
+      register: vault_pfsense
+
+    - name: Find DNS server entry
+      ansible.builtin.set_fact:
+        dns_entry: "{{ infra.hosts | selectattr('services', 'defined') | selectattr('services', 'contains', 'dns') | first }}"
+
+    - name: Apply role
+      ansible.builtin.include_role:
+        name: pfsense_api
+      vars:
+        pfsense_api_host: "{{ dns_entry.connection.host }}"
+        pfsense_api_validate_certs: false
+        pfsense_api_key: "{{ vault_pfsense.secret.api_key }}"

@@ -1,0 +1,19 @@
+services:
+  {{ kc_container_name }}:
+    image: "{{ kc_container_image }}"
+    container_name: {{ kc_container_name }}
+    command: start
+    environment:
+      KC_HOSTNAME: "{{ kc_domain }}"
+      KC_HTTPS_CERTIFICATE_FILE: /etc/keycloak/certs/tls.crt
+      KC_HTTPS_CERTIFICATE_KEY_FILE: /etc/keycloak/certs/tls.key
+      KC_HTTP_ENABLED: "false"
+      KC_HTTPS_PORT: "{{ kc_container_port }}"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+    volumes:
+      - ./keycloak.conf:/opt/keycloak/conf/keycloak.conf:ro
+      - ./certs:/etc/keycloak/certs:ro
+    ports:
+      - "{{ kc_host_port }}:{{ kc_container_port }}"
+    restart: unless-stopped

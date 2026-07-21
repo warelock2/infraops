@@ -1,0 +1,28 @@
+- name: Bootstrap ansible user on new VMs
+  hosts: k8s_control:k8s_worker
+  remote_user: ubuntu
+  become: yes
+  gather_facts: false
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 300
+
+    - name: Create ansible user .ssh directory
+      ansible.builtin.file:
+        path: /home/ansible/.ssh
+        state: directory
+        owner: ansible
+        group: ansible
+        mode: "0700"
+
+    - name: Copy public key to ansible user
+      ansible.builtin.copy:
+        src: ../files/ansible.pub
+        dest: /home/ansible/.ssh/authorized_keys
+        owner: ansible
+        group: ansible
+        mode: "0600"

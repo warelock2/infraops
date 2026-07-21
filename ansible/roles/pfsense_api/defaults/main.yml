@@ -1,0 +1,18 @@
+---
+# pfSense REST API role defaults
+pfsense_api_host: ""
+pfsense_api_port: 443
+pfsense_api_protocol: https
+pfsense_api_key: ""
+pfsense_api_validate_certs: false
+
+# REST API package settings
+pfsense_restapi_enabled: true
+pfsense_restapi_read_only: false
+pfsense_restapi_keep_backup: true
+pfsense_restapi_login_protection: true
+pfsense_restapi_auth_methods:
+  - BasicAuth
+  - KeyAuth
+pfsense_restapi_allowed_interfaces:
+  - LAN

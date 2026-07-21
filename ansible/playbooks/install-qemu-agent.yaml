@@ -1,0 +1,24 @@
+- name: Install and enable QEMU guest agent
+  hosts: k8s_control:k8s_worker
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 300
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
+    - name: Install qemu-guest-agent
+      ansible.builtin.apt:
+        name: qemu-guest-agent
+        state: present
+        update_cache: true
+
+    - name: Enable and start qemu-guest-agent
+      ansible.builtin.systemd:
+        name: qemu-guest-agent
+        enabled: true
+        state: started

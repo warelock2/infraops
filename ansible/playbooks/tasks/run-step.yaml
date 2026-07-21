@@ -1,0 +1,40 @@
+---
+# Dispatch a single workflow step (add/delete/list).
+# Expects: step.action, step.targets (list of {hostname, domain[, ip]})
+
+# ── LIST ──────────────────────────────────────────────
+
+- name: List — display pool hosts
+  ansible.builtin.debug:
+    msg: "{{ pool_overrides | map(attribute='host') | zip(pool_overrides | map(attribute='domain')) | map('join', '.') | zip(pool_overrides | map(attribute='ip') | map('first')) | map('join', ' = ') | list }}"
+  when: step.action == 'list'
+
+- name: List — summary
+  ansible.builtin.debug:
+    msg: "{{ pool_overrides | length }} host(s) in pool ({{ ip_pool.start }}-{{ ip_pool.end }})"
+  when: step.action == 'list'
+
+# ── ADD ───────────────────────────────────────────────
+
+- name: Add — find used IPs in pool
+  ansible.builtin.set_fact:
+    used_ips: "{{ pool_overrides | map(attribute='ip') | flatten | intersect(ip_list) }}"
+  when: step.action == 'add'
+
+- name: Add — create host overrides
+  ansible.builtin.include_tasks: tasks/add-host.yaml
+  loop: "{{ step.targets }}"
+  loop_control:
+    loop_var: target_item
+    label: "{{ target_item.hostname }}.{{ target_item.domain }}"
+  when: step.action == 'add'
+
+# ── DELETE ────────────────────────────────────────────
+
+- name: Delete — remove host overrides
+  ansible.builtin.include_tasks: tasks/delete-host.yaml
+  loop: "{{ step.targets }}"
+  loop_control:
+    loop_var: target_item
+    label: "{{ target_item.hostname }}.{{ target_item.domain }}"
+  when: step.action == 'delete'

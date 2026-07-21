@@ -1,0 +1,293 @@
+---
+- name: "Setup Keycloak: {{ kc_project_name | default('unknown') }}"
+  hosts: docker_services
+  become: yes
+  gather_facts: false
+  vars:
+    keycloak_url: "{{ lookup('env', 'KEYCLOAK_URL') | default('https://' + infra_service_domain + ':8443', true) }}"
+    keycloak_realm: "{{ infra_platform_keycloak_realm }}"
+    keycloak_auth_realm: "{{ infra_platform_keycloak_auth_realm }}"
+    keycloak_auth_username: "{{ infra_platform_keycloak_admin_user }}"
+    keycloak_auth_password: "{{ lookup('env', 'KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD') }}"
+    cluster_names: "{{ infra_platform_cluster_names.split(',') }}"
+  tasks:
+    - name: Ensure Keycloak admin credentials are available
+      ansible.builtin.fail:
+        msg: >
+          KEYCLOAK_BOOTSTRAP_ADMIN_USER and KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
+          must be set. Export them or add to inventory vars.
+      when: not keycloak_auth_username or not keycloak_auth_password
+
+    - name: Get Keycloak admin token
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/realms/{{ keycloak_auth_realm }}/protocol/openid-connect/token"
+        method: POST
+        body:
+          client_id: admin-cli
+          username: "{{ keycloak_auth_username }}"
+          password: "{{ keycloak_auth_password }}"
+          grant_type: password
+        body_format: form-urlencoded
+        validate_certs: false
+        status_code: [200, 400, 401]
+      register: kc_admin_token
+      ignore_errors: true
+
+    - name: Admin credentials rejected
+      ansible.builtin.debug:
+        msg: >-
+          Admin credentials rejected (HTTP {{ kc_admin_token.status }}).
+          Instance is already bootstrapped with different credentials — skipping.
+      when: kc_admin_token.status in [400, 401]
+
+    - name: End play if auth failed
+      ansible.builtin.meta: end_play
+      when: kc_admin_token.status in [400, 401]
+
+    - name: Keycloak not reachable
+      ansible.builtin.debug:
+        msg: >-
+          Keycloak at {{ keycloak_url }} is not reachable
+          ({{ kc_admin_token.msg | default('unknown error') }}) — skipping.
+      when: kc_admin_token is failed
+
+    - name: End play if Keycloak unreachable
+      ansible.builtin.meta: end_play
+      when: kc_admin_token is failed
+
+    - name: Check if infraops realm already exists
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_admin_token.json.access_token }}"
+        validate_certs: false
+        status_code: [200, 404]
+      register: realm_check
+
+    - name: Already bootstrapped
+      ansible.builtin.debug:
+        msg: "Realm '{{ keycloak_realm }}' already exists — skipping setup."
+      when: realm_check.status == 200
+
+    - name: End play if already bootstrapped
+      ansible.builtin.meta: end_play
+      when: realm_check.status == 200
+
+    - name: Ensure infraops realm exists
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ kc_admin_token.json.access_token }}"
+          Content-Type: application/json
+        body_format: json
+        body:
+          id: "{{ keycloak_realm }}"
+          realm: "{{ keycloak_realm }}"
+          enabled: true
+        validate_certs: false
+        status_code: [201, 409]
+
+    - name: Ensure cluster names were provided
+      ansible.builtin.fail:
+        msg: "No cluster names provided via infra_platform_cluster_names."
+      when: cluster_names | length == 0
+
+    - name: Create Keycloak client for each cluster
+      community.general.keycloak_client:
+        auth_keycloak_url: "{{ keycloak_url }}"
+        auth_realm: "{{ keycloak_auth_realm }}"
+        auth_username: "{{ keycloak_auth_username }}"
+        auth_password: "{{ keycloak_auth_password }}"
+        validate_certs: false
+        realm: "{{ keycloak_realm }}"
+        client_id: "kubernetes-{{ item }}"
+        name: "Kubernetes {{ item }}"
+        public_client: true
+        standard_flow_enabled: false
+        direct_access_grants_enabled: false
+        service_accounts_enabled: false
+        authorization_services_enabled: false
+        protocol: openid-connect
+        attributes:
+          oauth2.device.authorization.grant.enabled: true
+        protocol_mappers:
+          - name: groups
+            protocol: openid-connect
+            protocolMapper: oidc-group-membership-mapper
+            config:
+              access.token.claim: true
+              id.token.claim: true
+              userinfo.token.claim: true
+              introspection.token.claim: true
+              claim.name: groups
+              full.path: false
+          - name: kubernetes audience
+            protocol: openid-connect
+            protocolMapper: oidc-audience-mapper
+            config:
+              access.token.claim: true
+              id.token.claim: false
+              introspection.token.claim: true
+              includedCustomAudience: "kubernetes-{{ item }}"
+        state: present
+      loop: "{{ cluster_names }}"
+
+    - name: Create admin group for each cluster
+      community.general.keycloak_group:
+        auth_keycloak_url: "{{ keycloak_url }}"
+        auth_realm: "{{ keycloak_auth_realm }}"
+        auth_username: "{{ keycloak_auth_username }}"
+        auth_password: "{{ keycloak_auth_password }}"
+        validate_certs: false
+        realm: "{{ keycloak_realm }}"
+        name: "{{ item }}-admins"
+        state: present
+      loop: "{{ cluster_names }}"
+
+    - name: Create viewer group for each cluster
+      community.general.keycloak_group:
+        auth_keycloak_url: "{{ keycloak_url }}"
+        auth_realm: "{{ keycloak_auth_realm }}"
+        auth_username: "{{ keycloak_auth_username }}"
+        auth_password: "{{ keycloak_auth_password }}"
+        validate_certs: false
+        realm: "{{ keycloak_realm }}"
+        name: "{{ item }}-viewers"
+        state: present
+      loop: "{{ cluster_names }}"
+
+    - name: Create forgejo-automation client
+      community.general.keycloak_client:
+        auth_keycloak_url: "{{ keycloak_url }}"
+        auth_realm: "{{ keycloak_auth_realm }}"
+        auth_username: "{{ keycloak_auth_username }}"
+        auth_password: "{{ keycloak_auth_password }}"
+        validate_certs: false
+        realm: "{{ keycloak_realm }}"
+        client_id: forgejo-automation
+        name: Forgejo Automation
+        public_client: false
+        client_authenticator_type: client-secret
+        standard_flow_enabled: false
+        direct_access_grants_enabled: false
+        service_accounts_enabled: true
+        authorization_services_enabled: false
+        protocol: openid-connect
+        state: present
+      register: forgejo_client
+
+    - name: Get forgejo-automation client UUID
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/clients?clientId=forgejo-automation"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_admin_token.json.access_token }}"
+        validate_certs: false
+      register: forgejo_client_query
+
+    - name: Set forgejo-automation client UUID fact
+      ansible.builtin.set_fact:
+        forgejo_client_uuid: "{{ forgejo_client_query.json[0].id }}"
+
+    - name: Get forgejo-automation client secret
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/clients/{{ forgejo_client_uuid }}/client-secret"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_admin_token.json.access_token }}"
+        validate_certs: false
+      register: forgejo_secret
+
+    - name: Get realm-management client UUID
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/clients?clientId=realm-management"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_admin_token.json.access_token }}"
+        validate_certs: false
+      register: realm_mgmt_client_query
+
+    - name: Set realm-management client UUID fact
+      ansible.builtin.set_fact:
+        realm_mgmt_client_uuid: "{{ realm_mgmt_client_query.json[0].id }}"
+
+    - name: Get realm-management available roles
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/clients/{{ realm_mgmt_client_uuid }}/roles"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_admin_token.json.access_token }}"
+        validate_certs: false
+      register: realm_mgmt_roles
+
+    - name: Filter roles for forgejo-automation
+      ansible.builtin.set_fact:
+        forgejo_roles: >-
+          {{ realm_mgmt_roles.json |
+             selectattr('name', 'in', ['manage-clients', 'manage-groups', 'view-users']) |
+             list }}
+
+    - name: Get forgejo-automation service account user
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/users?username=service-account-forgejo-automation"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ kc_admin_token.json.access_token }}"
+        validate_certs: false
+      register: sa_user_query
+
+    - name: Set service account user UUID fact
+      ansible.builtin.set_fact:
+        sa_user_uuid: "{{ sa_user_query.json[0].id }}"
+
+    - name: Assign realm-management roles to forgejo-automation service account
+      ansible.builtin.uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ keycloak_realm }}/users/{{ sa_user_uuid }}/role-mappings/clients/{{ realm_mgmt_client_uuid }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ kc_admin_token.json.access_token }}"
+          Content-Type: application/json
+        body: "{{ forgejo_roles | to_json }}"
+        validate_certs: false
+        status_code: [200, 204]
+      when: forgejo_roles | length > 0
+
+    - name: Output forgejo-automation client secret
+      ansible.builtin.debug:
+        msg: |-
+          Forgejo automation client created.
+
+          Client ID:   forgejo-automation
+          Client secret: {{ forgejo_secret.json.value }}
+
+          Add this secret to Forgejo at:
+            Settings → Actions → Secrets → Add secret
+            Name: KEYCLOAK_CLIENT_SECRET
+            Value: {{ forgejo_secret.json.value }}
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: |-
+          Keycloak setup complete for cluster(s): {{ cluster_names | join(', ') }}
+
+          Clients created:
+          {% for c in cluster_names %}
+            - kubernetes-{{ c }}
+          {% endfor %}
+
+          Groups created per cluster:
+          {% for c in cluster_names %}
+            - {{ c }}-admins
+            - {{ c }}-viewers
+          {% endfor %}
+
+          To add a user to a group:
+            1. Go to Keycloak admin console
+            2. Realm '{{ keycloak_realm }}'
+            3. Users → find user → Groups tab → Join group
+
+          Forgejo automation client created.
+            Client secret is shown above in "Output forgejo-automation client secret".
+            Add it as KEYCLOAK_CLIENT_SECRET in Forgejo secrets.

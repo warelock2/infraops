@@ -1,0 +1,117 @@
+name: Enforce Infrastructure as Code
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+jobs:
+  terraform:
+    runs-on: docker
+
+    steps:
+      - name: Checkout
+        uses: https://code.forgejo.org/actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Validate Infrastructure YAML
+        uses: docker://python:3.12-alpine
+        with:
+          args: >
+            sh -c "apk add -q yq &&
+            pip install -q --upgrade --root-user-action=ignore pip &&
+            pip install -q --root-user-action=ignore check-jsonschema &&
+            check-jsonschema --schemafile config/infrastructure.schema.yaml
+            config/infrastructure.yaml"
+
+      - name: Generate Diagram
+        uses: docker://python:3.12-alpine
+        with:
+          args: >
+            sh -c "apk add -q yq &&
+            pip install -q --upgrade --root-user-action=ignore pip &&
+            pip install -q --root-user-action=ignore pyyaml &&
+            python scripts/render-infra.py"
+
+      - name: Terraform Init
+        uses: docker://hashicorp/terraform:1.7
+        with:
+          args: sh -c "cd terraform && terraform init"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+
+      - name: Terraform Validate
+        uses: docker://hashicorp/terraform:1.7
+        with:
+          args: sh -c "cd terraform && terraform validate -no-color"
+
+      - name: Terraform Plan
+        uses: docker://hashicorp/terraform:1.7
+        with:
+          args: sh -c "cd terraform && terraform plan -no-color -input=false"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          TF_VAR_proxmox_endpoint: ${{ secrets.PROXMOX_API_ENDPOINT }}
+          TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+      - name: K8s Drain Removed Nodes
+        if: github.ref == 'refs/heads/master'
+        uses: docker://alpine/ansible:latest
+        with:
+          args: >
+            sh -c "
+            apk add -q curl yq &&
+            K8S_VERSION=$(yq .platform.kubernetes.version config/infrastructure.yaml) &&
+            curl -sLO https://dl.k8s.io/release/v${K8S_VERSION}/bin/linux/amd64/kubectl &&
+            chmod +x kubectl &&
+            mv kubectl /usr/local/bin/ &&
+            mkdir -p ~/.kube &&
+            echo \"\$K8S_ADMIN_KUBECONFIG\" > ~/.kube/config &&
+            chmod 600 ~/.kube/config &&
+            ansible-playbook ansible/playbooks/k8s-drain-removed-nodes.yaml -i localhost,"
+        env:
+          K8S_ADMIN_KUBECONFIG: ${{ secrets.K8S_ADMIN_KUBECONFIG }}
+
+      - name: Fix Terraform Dir Permissions
+        if: github.ref == 'refs/heads/master'
+        uses: docker://python:3.12-alpine
+        with:
+          args: sh -c "chmod -R a+rwx terraform/.terraform"
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/master'
+        uses: docker://deltamir/terraform-ansible:1.15.0
+        with:
+          args: >
+            sh -c "
+            pip install --break-system-packages hvac pfsense-vshell &&
+            ansible-galaxy collection install pfrest.pfsense community.hashi_vault &&
+            cd terraform &&
+            terraform init -reconfigure &&
+            terraform apply -auto-approve -no-color -input=false -parallelism=1"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          TF_VAR_proxmox_endpoint: ${{ secrets.PROXMOX_API_ENDPOINT }}
+          TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+
+      - name: Ansible Bootstrap
+        if: github.ref == 'refs/heads/master'
+        uses: docker://alpine/ansible:latest
+        with:
+          args: sh ansible/bootstrap.sh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+          ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
+          KEYCLOAK_BOOTSTRAP_ADMIN_USER: ${{ secrets.KEYCLOAK_BOOTSTRAP_ADMIN_USER }}
+          KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD }}
+          TF_VAR_proxmox_endpoint: ${{ secrets.PROXMOX_API_ENDPOINT }}
+          TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}

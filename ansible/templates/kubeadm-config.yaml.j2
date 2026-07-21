@@ -1,0 +1,34 @@
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ node_ip }}
+  bindPort: 6444
+nodeRegistration:
+  criSocket: unix:///var/run/containerd/containerd.sock
+  name: {{ inventory_hostname }}
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+kubernetesVersion: v{{ k8s_version }}
+controlPlaneEndpoint: "{{ cp_endpoint }}"
+networking:
+  podSubnet: {{ pod_network_cidr }}
+apiServer:
+  certSANs:
+    - "{{ cp_api_host }}"
+    - "{{ cp_vip }}"
+  extraArgs:
+    - name: oidc-issuer-url
+      value: {{ oidc_issuer_url }}
+    - name: oidc-client-id
+      value: {{ oidc_client_id }}
+    - name: oidc-username-claim
+      value: preferred_username
+    - name: oidc-groups-claim
+      value: groups
+    - name: oidc-ca-file
+      value: /etc/kubernetes/pki/oidc-ca.pem
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd

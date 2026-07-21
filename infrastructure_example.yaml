@@ -1,0 +1,96 @@
+# Example infrastructure.yaml
+# Copy this file to infrastructure.yaml and customize for your environment.
+
+name: my-infrastructure
+
+platform:
+  admin:
+    user: myuser
+    group: mygroup
+  keycloak:
+    realm: myproject
+    auth_realm: master
+    admin_user: admin
+    container_image: "quay.io/keycloak/keycloak:latest"
+  kubernetes:
+    version: "1.33.0"
+    pod_network_cidr: "10.244.0.0/16"
+    calico_version: "v3.29.2"
+    oidc_issuer_url: "https://keycloak.example.com:8443/realms/myproject"
+  terraform:
+    version: "1.7.5"
+  proxmox:
+    node: myproxmox
+    template_id: 8000
+    dns_servers:
+      - "10.0.0.1"
+    dns_domain: example.com
+    linked_clone: false
+    tls_self_signed: true
+
+defaults:
+  cluster_type: k8s
+  service_type: docker_compose
+  service_host: docker
+  gateway: "10.0.0.1"
+  vm:
+    cores: 2
+    memory_gb: 8
+    disk_gb: 32
+    datastore: local-lvm
+  planes:
+    control_plane:
+      plane_name: control
+    workers:
+      plane_name: worker
+
+clusters:
+  - name: mycluster
+    enforcement:
+      - infrastructure_provisioning
+      - configuration_management
+    control_plane:
+      nodes: 1
+      vm_id_start: 9000
+      vm_id_end: 9099
+      vip: "10.0.0.100"
+    workers:
+      nodes: 2
+      vm_id_start: 9010
+      vm_id_end: 9099
+
+hosts:
+  - name: docker
+    enforcement:
+      - configuration_management
+    connection:
+      host: docker.example.com
+      user: ansible
+
+  - name: firewall
+    services:
+      - dns
+      - dhcp
+      - gateway
+      - firewall
+    ip_pool:
+      start: "10.0.0.50"
+      end: "10.0.0.99"
+    enforcement: []
+    connection:
+      host: 10.0.0.1
+      user: ansible
+
+services:
+  defaults:
+    host: docker
+  instances:
+    keycloak:
+      - name: keycloak
+        port: 8443
+    minio:
+      - name: minio
+        port: 9000
+    vault:
+      - name: vault
+        port: 8200
