@@ -41,20 +41,20 @@ defaults:
     workers:
       plane_name: worker
 
-#clusters:
-#  - name: mushroom
-#    enforcement:
-#      - infrastructure_provisioning
-#      - configuration_management
-#    control_plane:
-#      nodes: 1
-#      vm_id_start: 9000
-#      vm_id_end: 9099
-#      vip: "192.168.0.30"
-#    workers:
-#      nodes: 2
-#      vm_id_start: 9010
-#      vm_id_end: 9099
+clusters:
+  - name: mushroom
+    enforcement:
+      - infrastructure_provisioning
+      - configuration_management
+    control_plane:
+      nodes: 1
+      vm_id_start: 9000
+      vm_id_end: 9099
+      vip: "192.168.0.30"
+    workers:
+      nodes: 2
+      vm_id_start: 9010
+      vm_id_end: 9099
 
 hosts:
   - name: docker
