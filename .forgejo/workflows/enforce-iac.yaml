@@ -48,6 +48,9 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          VAULT_ADDR: https://docker.localdomain:8200
+          VAULT_SKIP_VERIFY: "true"
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       - name: Terraform Validate
         uses: docker://alpine/ansible:latest
@@ -63,6 +66,9 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          VAULT_ADDR: https://docker.localdomain:8200
+          VAULT_SKIP_VERIFY: "true"
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       - name: Terraform Plan
         uses: docker://alpine/ansible:latest
