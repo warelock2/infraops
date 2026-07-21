@@ -31,7 +31,9 @@ terraform {
   }
 }
 
-provider "vault" {}
+provider "vault" {
+  skip_child_token = true
+}
 
 data "vault_generic_secret" "proxmox" {
   path = "secret/infraops/proxmox"
