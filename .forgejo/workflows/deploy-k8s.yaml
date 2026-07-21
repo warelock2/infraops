@@ -34,19 +34,14 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
 
-      - name: Install Ansible Collections
-        uses: docker://alpine/ansible:latest
-        with:
-          args: >
-            sh -c "ansible-galaxy collection install
-            kubernetes.core community.general ansible.posix
-            community.hashi_vault pfrest.pfsense --force"
-
       - name: Run K8s Cluster Playbook
         uses: docker://alpine/ansible:latest
         with:
           args: >
             sh -c 'apk add -q yq &&
+            ansible-galaxy collection install
+            kubernetes.core community.general ansible.posix
+            community.hashi_vault pfrest.pfsense --force &&
             if [ -z "$ADMIN_SSH_PUBLIC_KEY" ]; then echo "ERROR: ADMIN_SSH_PUBLIC_KEY not set" && exit 1; fi &&
             if [ -z "$ANSIBLE_SSH_PRIVATE_KEY" ]; then echo "ERROR: ANSIBLE_SSH_PRIVATE_KEY not set" && exit 1; fi &&
             echo "$ADMIN_SSH_PUBLIC_KEY" > /tmp/ssh_key.pub &&
