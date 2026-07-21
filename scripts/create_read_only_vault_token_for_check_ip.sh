@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # create_read_only_vault_token_for_check_ip.sh
-# Creates a read-only policy scoped to secret/infraops/pfsense and a reusable token
+# Creates a read-only policy scoped to secret/infraops/* and a reusable token
 
 set -euo pipefail
 
@@ -13,6 +13,12 @@ path "secret/data/infraops/pfsense" {
   capabilities = ["read"]
 }
 path "secret/metadata/infraops/pfsense" {
+  capabilities = ["read"]
+}
+path "secret/data/infraops/proxmox" {
+  capabilities = ["read"]
+}
+path "secret/metadata/infraops/proxmox" {
   capabilities = ["read"]
 }
 EOF
