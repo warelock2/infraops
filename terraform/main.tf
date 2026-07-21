@@ -37,7 +37,7 @@ locals {
   infra = yamldecode(file("${path.root}/../config/infrastructure.yaml"))
 
   managed_clusters = [
-    for c in local.infra.clusters : c
+    for c in try(local.infra.clusters, []) : c
     if contains(try(c.enforcement, []), "infrastructure_provisioning")
   ]
 
