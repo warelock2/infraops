@@ -122,19 +122,3 @@ jobs:
           TF_VAR_proxmox_endpoint: ${{ secrets.PROXMOX_API_ENDPOINT }}
           TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
-
-      - name: Ansible Bootstrap
-        if: github.ref == 'refs/heads/master'
-        uses: docker://alpine/ansible:latest
-        with:
-          args: sh ansible/bootstrap.sh
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
-          ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
-          KEYCLOAK_BOOTSTRAP_ADMIN_USER: ${{ secrets.KEYCLOAK_BOOTSTRAP_ADMIN_USER }}
-          KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD }}
-          TF_VAR_proxmox_endpoint: ${{ secrets.PROXMOX_API_ENDPOINT }}
-          TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
-          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
