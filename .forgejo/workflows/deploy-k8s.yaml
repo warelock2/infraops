@@ -39,7 +39,7 @@ jobs:
         with:
           args: >
             sh -c 'apk add -q yq py3-pip &&
-            pip3 install -q --root-user-action=ignore hvac &&
+            pip3 install -q --break-system-packages --root-user-action=ignore hvac &&
             ansible-galaxy collection install
             kubernetes.core community.general ansible.posix
             community.hashi_vault pfrest.pfsense --force &&
