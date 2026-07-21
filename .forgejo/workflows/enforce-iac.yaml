@@ -78,8 +78,8 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          TF_VAR_proxmox_endpoint: ${{ secrets.PROXMOX_API_ENDPOINT }}
-          TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+          VAULT_ADDR: https://docker.localdomain:8200
+          VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
       - name: K8s Drain Removed Nodes
         if: github.ref == 'refs/heads/master'
@@ -119,6 +119,6 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          TF_VAR_proxmox_endpoint: ${{ secrets.PROXMOX_API_ENDPOINT }}
-          TF_VAR_proxmox_api_token: ${{ secrets.PROXMOX_API_TOKEN }}
+          VAULT_ADDR: https://docker.localdomain:8200
+          VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
