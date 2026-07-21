@@ -1,0 +1,178 @@
+---
+- name: "Create admin user: {{ kc_project_name }}"
+  hosts: docker_services
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Create admin user
+      ansible.builtin.user:
+        name: "{{ infra_admin_user }}"
+        shell: /bin/bash
+        groups: sudo
+        append: yes
+        state: present
+
+    - name: Create .ssh directory
+      ansible.builtin.file:
+        path: "/home/{{ infra_admin_user }}/.ssh"
+        state: directory
+        mode: "0700"
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+
+    - name: Add SSH public key
+      ansible.posix.authorized_key:
+        user: "{{ infra_admin_user }}"
+        state: present
+        key: "{{ infra_admin_ssh_public_key }}"
+        exclusive: no
+
+    - name: Ensure admin user can sudo without password
+      ansible.builtin.lineinfile:
+        path: "/etc/sudoers.d/{{ infra_admin_user }}"
+        line: "{{ infra_admin_user }} ALL=(ALL) NOPASSWD: ALL"
+        create: yes
+        mode: "0440"
+        validate: "visudo -cf %s"
+
+- name: "Deploy Keycloak: {{ kc_project_name }}"
+  hosts: docker_services
+  become: yes
+  remote_user: "{{ infra_admin_user }}"
+  gather_facts: true
+  vars:
+    kc_project_name: keycloak
+    kc_project_dir: "/home/{{ infra_admin_user }}/projects/{{ kc_project_name }}"
+    kc_host_port: 8443
+    kc_container_port: 8443
+    kc_domain: "{{ infra_service_domain }}"
+    kc_container_name: "{{ kc_project_name }}"
+    kc_container_image: "{{ infra_platform_keycloak_container_image | default('quay.io/keycloak/keycloak:latest') }}"
+    kc_bootstrap_admin_user: admin
+    kc_bootstrap_admin_password: "{{ lookup('env', 'KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD') | default('', true) }}"
+    provision_mode: false
+  tasks:
+    - name: Check if already provisioned
+      ansible.builtin.stat:
+        path: "{{ kc_project_dir }}/.env"
+      register: env_file
+
+    - name: Already provisioned
+      ansible.builtin.debug:
+        msg: >
+          Instance '{{ kc_project_name }}' already provisioned
+          ({{ kc_project_dir }}/.env exists). Skipping.
+      when: env_file.stat.exists
+
+    - name: End play if already provisioned
+      ansible.builtin.meta: end_play
+      when: env_file.stat.exists
+
+    - name: Ensure provision_mode is enabled for new deployment
+      ansible.builtin.fail:
+        msg: >
+          Instance '{{ kc_project_name }}' is not provisioned but
+          provision_mode is not enabled. Run with
+          -e "provision_mode=true kc_bootstrap_admin_password=..."
+          or set KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD env var.
+      when: not provision_mode
+
+    - name: Ensure bootstrap admin password is provided
+      ansible.builtin.fail:
+        msg: >
+          kc_bootstrap_admin_password must be set via --extra-vars
+          or KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD env var.
+      when: kc_bootstrap_admin_password | length == 0
+
+    - name: Create project directory
+      ansible.builtin.file:
+        path: "{{ kc_project_dir }}"
+        state: directory
+        mode: "0750"
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+
+    - name: Create certs directory
+      ansible.builtin.file:
+        path: "{{ kc_project_dir }}/certs"
+        state: directory
+        mode: "0750"
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+
+    - name: Generate self-signed TLS certificate
+      ansible.builtin.shell:
+        cmd: >
+          openssl req -x509 -nodes -days 3650 -newkey rsa:2048
+          -keyout "{{ kc_project_dir }}/certs/tls.key"
+          -out "{{ kc_project_dir }}/certs/tls.crt"
+          -subj "/CN={{ kc_domain }}"
+          -addext "subjectAltName=DNS:{{ kc_domain }}"
+        creates: "{{ kc_project_dir }}/certs/tls.crt"
+
+    - name: Set certificate file permissions and ownership
+      ansible.builtin.file:
+        path: "{{ kc_project_dir }}/certs/{{ item }}"
+        mode: "0644"
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+      loop:
+        - tls.crt
+        - tls.key
+
+    - name: Template docker-compose.yml
+      ansible.builtin.template:
+        src: ../templates/keycloak/docker-compose.yml.j2
+        dest: "{{ kc_project_dir }}/docker-compose.yml"
+        mode: "0640"
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+
+    - name: Template keycloak.conf
+      ansible.builtin.template:
+        src: ../templates/keycloak/keycloak.conf.j2
+        dest: "{{ kc_project_dir }}/keycloak.conf"
+        mode: "0640"
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+
+    - name: Write .env
+      ansible.builtin.copy:
+        dest: "{{ kc_project_dir }}/.env"
+        content: |
+          KC_BOOTSTRAP_ADMIN_PASSWORD={{ kc_bootstrap_admin_password }}
+        mode: "0600"
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+
+    - name: Docker compose up
+      ansible.builtin.shell:
+        cmd: docker compose up -d
+        chdir: "{{ kc_project_dir }}"
+      register: compose_result
+      changed_when: compose_result.stdout is search('Started|Created|Starting')
+
+    - name: Wait for Keycloak to be ready
+      ansible.builtin.uri:
+        url: "https://{{ kc_domain }}:{{ kc_host_port }}/realms/master/.well-known/openid-configuration"
+        validate_certs: false
+      register: health_check
+      until: health_check.status == 200
+      retries: 40
+      delay: 5
+
+    - name: Connection info
+      ansible.builtin.debug:
+        msg: |-
+          Keycloak instance '{{ kc_project_name }}' is ready.
+
+          Admin console: https://{{ kc_domain }}:{{ kc_host_port }}/admin
+            Username: {{ kc_bootstrap_admin_user }}
+            Password: {{ kc_bootstrap_admin_password }}
+            Realm:    master
+
+          Run keycloak-setup.yaml against this instance:
+            KEYCLOAK_BOOTSTRAP_ADMIN_USER={{ kc_bootstrap_admin_user }}
+            KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD={{ kc_bootstrap_admin_password }}
+            KEYCLOAK_URL=https://{{ kc_domain }}:{{ kc_host_port }}
+            ansible-playbook ansible/playbooks/keycloak-setup.yaml

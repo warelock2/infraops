@@ -1,0 +1,43 @@
+---
+# Ensure pfSense REST API is installed and configured
+
+- name: Check if REST API is available
+  ansible.builtin.uri:
+    url: "{{ pfsense_api_protocol }}://{{ pfsense_api_host }}:{{ pfsense_api_port }}/api/v2/schema/native"
+    validate_certs: "{{ pfsense_api_validate_certs }}"
+    return_content: yes
+    status_code: [200]
+  register: api_check
+  failed_when: false
+
+- name: Set API installed fact
+  ansible.builtin.set_fact:
+    api_installed: "{{ api_check.status | default(0) == 200 }}"
+
+- name: Display API status
+  ansible.builtin.debug:
+    msg: "REST API {{ 'is installed' if api_installed else 'is NOT installed' }}"
+
+- name: Fail if REST API is not installed
+  ansible.builtin.fail:
+    msg: "REST API is not installed on {{ pfsense_api_host }}. Install it manually first."
+  when: not api_installed
+
+- name: Configure REST API settings
+  pfrest.pfsense.system_restapi_settings:
+    api_host: "{{ pfsense_api_host }}"
+    api_port: "{{ pfsense_api_port }}"
+    api_protocol: "{{ pfsense_api_protocol }}"
+    api_key: "{{ pfsense_api_key }}"
+    validate_certs: "{{ pfsense_api_validate_certs }}"
+    enabled: "{{ pfsense_restapi_enabled }}"
+    read_only: "{{ pfsense_restapi_read_only }}"
+    keep_backup: "{{ pfsense_restapi_keep_backup }}"
+    login_protection: "{{ pfsense_restapi_login_protection }}"
+    auth_methods: "{{ pfsense_restapi_auth_methods }}"
+    allowed_interfaces: "{{ pfsense_restapi_allowed_interfaces }}"
+  register: settings_result
+
+- name: Display settings result
+  ansible.builtin.debug:
+    msg: "REST API settings {{ 'updated' if settings_result.changed else 'already correct' }}"

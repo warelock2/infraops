@@ -1,0 +1,14 @@
+---
+ansible_python_interpreter: /usr/bin/python3
+
+# Platform config passed from bootstrap.sh via extra-vars
+k8s_version: "{{ infra_platform_kubernetes_version }}"
+pod_network_cidr: "{{ infra_platform_kubernetes_pod_network_cidr }}"
+calico_version: "{{ infra_platform_kubernetes_calico_version }}"
+domain: "{{ infra_service_domain }}"
+admin_user: "{{ infra_admin_user }}"
+admin_group: "{{ infra_admin_group }}"
+
+# pfSense API connection vars
+pfsense_api_host: 192.168.0.1
+pfsense_api_validate_certs: false

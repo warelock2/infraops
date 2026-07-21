@@ -1,0 +1,100 @@
+name: infraops
+
+platform:
+  admin:
+    user: warelock
+    group: warelock
+  keycloak:
+    realm: infraops
+    auth_realm: master
+    admin_user: admin
+    container_image: "quay.io/keycloak/keycloak:latest"
+  kubernetes:
+    version: "1.33.0"
+    pod_network_cidr: "10.244.0.0/16"
+    calico_version: "v3.29.2"
+    oidc_issuer_url: "https://docker.localdomain:8443/realms/infraops"
+  terraform:
+    version: "1.7.5"
+  proxmox:
+    node: utopiaplanitia
+    template_id: 8000
+    dns_servers:
+      - "192.168.0.1"
+    dns_domain: localdomain
+    linked_clone: false
+    tls_self_signed: true
+
+defaults:
+  cluster_type: k8s
+  service_type: docker_compose
+  service_host: docker
+  gateway: "192.168.0.1"
+  vm:
+    cores: 2
+    memory_gb: 8
+    disk_gb: 32
+    datastore: RAIDZ
+  planes:
+    control_plane:
+      plane_name: control
+    workers:
+      plane_name: worker
+
+#clusters:
+#  - name: mushroom
+#    enforcement:
+#      - infrastructure_provisioning
+#      - configuration_management
+#    control_plane:
+#      nodes: 1
+#      vm_id_start: 9000
+#      vm_id_end: 9099
+#      vip: "192.168.0.30"
+#    workers:
+#      nodes: 2
+#      vm_id_start: 9010
+#      vm_id_end: 9099
+
+hosts:
+  - name: docker
+    enforcement:
+      - configuration_management
+    connection:
+      host: docker.localdomain
+      user: ansible
+
+  - name: firewall
+    services:
+      - dns
+      - dhcp
+      - gateway
+      - firewall
+      - ntp
+      - proxy
+      - vpn
+      - storage
+      - monitoring
+    ip_pool:
+      start: "192.168.0.40"
+      end: "192.168.0.59"
+    enforcement: []
+    connection:
+      host: 192.168.0.1
+      user: ansible
+
+services:
+  defaults:
+    host: docker
+  instances:
+    keycloak:
+      - name: keycloak
+        port: 8443
+      - name: kctest
+        port: 8444
+    minio:
+      - name: minio
+        port: 9000
+    vault:
+      - name: vault
+        port: 8200

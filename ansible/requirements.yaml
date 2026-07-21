@@ -1,0 +1,7 @@
+collections:
+  - community.general
+  - community.hashi_vault
+  - ansible.posix
+  - kubernetes.core
+  - pfsensible.core
+  - pfrest.pfsense

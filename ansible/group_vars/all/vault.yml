@@ -1,0 +1,3 @@
+---
+# pfSense API credentials are stored in HashiCorp Vault at secret/infraops/pfsense
+# No local credentials needed — Ansible pulls from Vault via community.hashi_vault

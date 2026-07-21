@@ -1,0 +1,581 @@
+---
+- name: "Create admin user on all nodes"
+  hosts: k8s_control:k8s_worker
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 600
+
+    - name: Wait for cloud-init to complete
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+      failed_when: false
+      timeout: 300
+
+    - name: Create admin user
+      ansible.builtin.user:
+        name: "{{ infra_admin_user }}"
+        shell: /bin/bash
+        groups: sudo
+        append: yes
+        state: present
+
+    - name: Create .ssh directory
+      ansible.builtin.file:
+        path: "/home/{{ infra_admin_user }}/.ssh"
+        state: directory
+        mode: "0700"
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+
+    - name: Add SSH public key
+      ansible.posix.authorized_key:
+        user: "{{ infra_admin_user }}"
+        state: present
+        key: "{{ lookup('file', infra_ssh_key_file) }}"
+        exclusive: no
+
+    - name: "Ensure {{ infra_admin_user }} can sudo without password"
+      ansible.builtin.lineinfile:
+        path: "/etc/sudoers.d/{{ infra_admin_user }}"
+        line: "{{ infra_admin_user }} ALL=(ALL) NOPASSWD: ALL"
+        create: yes
+        mode: "0440"
+        validate: "visudo -cf %s"
+
+- name: K8s common setup
+  hosts: k8s_control:k8s_worker
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 180
+
+    - name: Gather facts
+      ansible.builtin.setup:
+
+    - name: Load kernel modules for k8s
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - overlay
+        - br_netfilter
+
+    - name: Persist kernel modules
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/k8s.conf
+        content: |
+          overlay
+          br_netfilter
+        mode: "0644"
+
+    - name: Configure sysctl for k8s
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/k8s.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward = 1
+        mode: "0644"
+      register: _sysctl_config
+
+    - name: Apply sysctl settings
+      ansible.builtin.command: sysctl --system
+      when: _sysctl_config.changed
+
+    - name: Install containerd
+      ansible.builtin.apt:
+        name: containerd
+        state: present
+        update_cache: true
+
+    - name: Configure containerd with SystemdCgroup
+      ansible.builtin.shell:
+        cmd: >
+          mkdir -p /etc/containerd &&
+          containerd config default > /etc/containerd/config.toml &&
+          sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Enable and restart containerd
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted
+        enabled: true
+
+    - name: Set k8s major.minor version
+      ansible.builtin.set_fact:
+        k8s_major_minor: "{{ k8s_version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}"
+
+    - name: Add k8s apt key
+      ansible.builtin.shell:
+        cmd: >
+          mkdir -p /etc/apt/keyrings &&
+          curl -fsSL https://pkgs.k8s.io/core:/stable:/v{{ k8s_major_minor }}/deb/Release.key
+          | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+    - name: Add k8s apt repo
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v{{ k8s_major_minor }}/deb/ /"
+        filename: kubernetes
+        state: present
+
+    - name: Install kubelet, kubeadm, kubectl
+      ansible.builtin.apt:
+        name:
+          - "kubelet={{ k8s_version }}-*"
+          - "kubeadm={{ k8s_version }}-*"
+          - "kubectl={{ k8s_version }}-*"
+        state: present
+        update_cache: true
+
+    - name: Hold k8s packages
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: Install wireguard-tools
+      ansible.builtin.apt:
+        name: wireguard-tools
+        state: present
+
+    - name: Load wireguard kernel module
+      community.general.modprobe:
+        name: wireguard
+        state: present
+
+    - name: Install kubernetes Python library
+      ansible.builtin.apt:
+        name: python3-kubernetes
+        state: present
+
+    - name: Extract cluster name from hostname
+      ansible.builtin.set_fact:
+        cluster_name: "{{ inventory_hostname | regex_replace('^k8s-(.+)-(?:control|worker)-\\d+$', '\\1') }}"
+        oidc_client_id: "kubernetes-{{ inventory_hostname | regex_replace('^k8s-(.+)-(?:control|worker)-\\d+$', '\\1') }}"
+      when: inventory_hostname is match('^k8s-.+-(?:control|worker)-\\d+$')
+
+    - name: Create pki directory
+      ansible.builtin.file:
+        path: /etc/kubernetes/pki
+        state: directory
+        mode: "0755"
+      when: inventory_hostname in groups['k8s_control']
+
+    - name: Copy OIDC CA certificate
+      ansible.builtin.copy:
+        src: ../files/oidc-ca.pem
+        dest: /etc/kubernetes/pki/oidc-ca.pem
+        mode: "0644"
+      when: inventory_hostname in groups['k8s_control']
+
+- name: K8s control plane load balancer (keepalived + haproxy)
+  hosts: k8s_control
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Get node IP address
+      ansible.builtin.command:
+        cmd: hostname -I
+      register: _node_ip_raw
+      changed_when: false
+
+    - name: Get default interface
+      ansible.builtin.shell:
+        cmd: "ip route show default | awk 'NR==1{print $5}'"
+      register: _default_route
+      changed_when: false
+
+    - name: Set node IP and interface facts
+      ansible.builtin.set_fact:
+        node_ip: "{{ _node_ip_raw.stdout.split()[0] }}"
+        node_iface: "{{ _default_route.stdout.strip() }}"
+
+    - name: Install keepalived and haproxy
+      ansible.builtin.apt:
+        name:
+          - keepalived
+          - haproxy
+        state: present
+        update_cache: true
+
+    - name: Render keepalived config
+      ansible.builtin.template:
+        src: ../templates/keepalived.conf.j2
+        dest: /etc/keepalived/keepalived.conf
+        mode: "0644"
+      notify: Restart keepalived
+
+    - name: Render haproxy config
+      ansible.builtin.template:
+        src: ../templates/haproxy.cfg.j2
+        dest: /etc/haproxy/haproxy.cfg
+        mode: "0644"
+      notify: Restart haproxy
+
+    - name: Enable and start keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: started
+        enabled: true
+
+    - name: Enable and start haproxy
+      ansible.builtin.systemd:
+        name: haproxy
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Restart keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted
+
+    - name: Restart haproxy
+      ansible.builtin.systemd:
+        name: haproxy
+        state: restarted
+
+- name: K8s control plane init
+  hosts: k8s_control
+  become: yes
+  gather_facts: false
+  serial: 1
+  vars:
+    cp_leader: "{{ (groups['k8s_control'] | sort)[0] }}"
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Get node IP address
+      ansible.builtin.command:
+        cmd: hostname -I
+      register: _node_ip_raw
+      changed_when: false
+
+    - name: Set node IP fact
+      ansible.builtin.set_fact:
+        node_ip: "{{ _node_ip_raw.stdout.split()[0] }}"
+
+    - name: Template kubeadm config
+      ansible.builtin.template:
+        src: ../templates/kubeadm-config.yaml.j2
+        dest: /tmp/kubeadm-config.yaml
+        mode: "0644"
+
+    - name: Check if cluster already initialized
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: k8s_admin_conf
+
+    - name: Pull kubeadm config images
+      ansible.builtin.command:
+        cmd: kubeadm config images pull --config /tmp/kubeadm-config.yaml
+      changed_when: true
+      when: not k8s_admin_conf.stat.exists
+
+    - name: kubeadm init (control plane leader)
+      ansible.builtin.command:
+        cmd: kubeadm init --config /tmp/kubeadm-config.yaml --upload-certs
+      changed_when: true
+      register: kubeadm_init
+      when:
+        - inventory_hostname == cp_leader
+        - not k8s_admin_conf.stat.exists
+
+    - name: kubeadm join (additional control plane node)
+      ansible.builtin.command:
+        cmd: "{{ hostvars[cp_leader]['k8s_cp_join_command'] }}"
+      changed_when: true
+      when:
+        - inventory_hostname != cp_leader
+        - not k8s_admin_conf.stat.exists
+
+    - name: Create .kube directory for ansible user
+      ansible.builtin.file:
+        path: /home/ansible/.kube
+        state: directory
+        owner: ansible
+        group: ansible
+        mode: "0700"
+      when: inventory_hostname == cp_leader
+
+    - name: Copy admin kubeconfig for ansible user
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/ansible/.kube/config
+        remote_src: true
+        owner: ansible
+        group: ansible
+        mode: "0600"
+      when: inventory_hostname == cp_leader
+
+    - name: "Create .kube directory for {{ infra_admin_user }} user"
+      ansible.builtin.file:
+        path: "/home/{{ infra_admin_user }}/.kube"
+        state: directory
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+        mode: "0700"
+      when: inventory_hostname == cp_leader
+
+    - name: "Copy admin kubeconfig for {{ infra_admin_user }} user"
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ infra_admin_user }}/.kube/config"
+        remote_src: true
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+        mode: "0600"
+      when: inventory_hostname == cp_leader
+
+    - name: Read admin kubeconfig for worker distribution
+      ansible.builtin.slurp:
+        src: /etc/kubernetes/admin.conf
+      register: admin_kubeconfig
+      when: inventory_hostname == cp_leader
+
+    - name: Share admin kubeconfig with worker hosts
+      ansible.builtin.set_fact:
+        k8s_admin_kubeconfig: "{{ admin_kubeconfig.content | b64decode }}"
+      when: inventory_hostname == cp_leader
+
+    - name: Download Calico manifest
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/calico.yaml"
+        dest: /tmp/calico.yaml
+        mode: "0644"
+      when: inventory_hostname == cp_leader
+
+    - name: Enable WireGuard in Calico manifest
+      ansible.builtin.shell:
+        cmd: >
+          sed -i '/CALICO_IPV6POOL_CIDR/a\
+            - name: WIREGUARD_ENABLED\n              value: "true"' /tmp/calico.yaml
+      when: inventory_hostname == cp_leader
+
+    - name: Install Calico CNI
+      ansible.builtin.shell:
+        cmd: kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/calico.yaml
+      changed_when: true
+      when: inventory_hostname == cp_leader
+
+    - name: Create join token for nodes
+      ansible.builtin.command:
+        cmd: kubeadm token create --print-join-command
+      changed_when: true
+      register: join_command
+      when: inventory_hostname == cp_leader
+
+    - name: Upload control plane certificates
+      ansible.builtin.command:
+        cmd: kubeadm init phase upload-certs --upload-certs
+      changed_when: true
+      register: cert_key_raw
+      when: inventory_hostname == cp_leader
+
+    - name: Share worker and control-plane join commands
+      ansible.builtin.set_fact:
+        k8s_join_command: "kubeadm join {{ cp_endpoint }} --token {{ join_command.stdout | regex_search('(?<=--token )[^ ]+') }} --discovery-token-ca-cert-hash {{ join_command.stdout | regex_search('(?<=--discovery-token-ca-cert-hash )[^ ]+') }}"
+        k8s_cp_join_command: "kubeadm join {{ cp_endpoint }} --token {{ join_command.stdout | regex_search('(?<=--token )[^ ]+') }} --discovery-token-ca-cert-hash {{ join_command.stdout | regex_search('(?<=--discovery-token-ca-cert-hash )[^ ]+') }} --control-plane --certificate-key {{ cert_key_raw.stdout | regex_search('[a-f0-9]{64}') }}"
+      when: inventory_hostname == cp_leader
+
+- name: K8s workers join
+  hosts: k8s_worker
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        delay: 5
+        timeout: 120
+
+    - name: Get join command from control plane
+      ansible.builtin.set_fact:
+        k8s_join_command: "{{ hostvars[(groups['k8s_control'] | sort)[0]]['k8s_join_command'] }}"
+
+    - name: Check if node already joined
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: k8s_kubelet_conf
+
+    - name: Join the cluster
+      ansible.builtin.shell:
+        cmd: "{{ k8s_join_command }}"
+      changed_when: true
+      when: not k8s_kubelet_conf.stat.exists
+
+    - name: "Create .kube directory for {{ infra_admin_user }} user"
+      ansible.builtin.file:
+        path: "/home/{{ infra_admin_user }}/.kube"
+        state: directory
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+        mode: "0700"
+
+    - name: "Copy admin kubeconfig from control plane to {{ infra_admin_user }} user"
+      ansible.builtin.shell:
+        cmd: |
+          mkdir -p "/home/{{ infra_admin_user }}/.kube"
+          echo '{{ hostvars[(groups['k8s_control'] | sort)[0]]['k8s_admin_kubeconfig'] | b64encode }}' | base64 -d > "/home/{{ infra_admin_user }}/.kube/config"
+          chown "{{ infra_admin_user }}:{{ infra_admin_group }}" "/home/{{ infra_admin_user }}/.kube/config"
+          chmod 0600 "/home/{{ infra_admin_user }}/.kube/config"
+
+- name: K8s RBAC
+  hosts: k8s_control
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Wait for all nodes ready
+      ansible.builtin.shell:
+        cmd: >
+          kubectl wait --for=condition=Ready nodes --all
+          --timeout=300s
+          --kubeconfig /etc/kubernetes/admin.conf
+      changed_when: false
+
+    - name: Create ClusterRoleBinding for k8s-admins (legacy)
+      kubernetes.core.k8s:
+        kubeconfig: /etc/kubernetes/admin.conf
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: k8s-admins-cluster-admin
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: cluster-admin
+          subjects:
+            - apiGroup: rbac.authorization.k8s.io
+              kind: Group
+              name: k8s-admins
+
+    - name: Create ClusterRoleBinding for {{ cluster_name }}-admins
+      kubernetes.core.k8s:
+        kubeconfig: /etc/kubernetes/admin.conf
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: "{{ cluster_name }}-admins-cluster-admin"
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: cluster-admin
+          subjects:
+            - apiGroup: rbac.authorization.k8s.io
+              kind: Group
+              name: "{{ cluster_name }}-admins"
+
+    - name: Create ClusterRoleBinding for {{ cluster_name }}-viewers
+      kubernetes.core.k8s:
+        kubeconfig: /etc/kubernetes/admin.conf
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: "{{ cluster_name }}-viewers"
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: view
+          subjects:
+            - apiGroup: rbac.authorization.k8s.io
+              kind: Group
+              name: "{{ cluster_name }}-viewers"
+
+- name: Create API DNS entry for cluster endpoint
+  hosts: localhost
+  gather_facts: no
+  connection: local
+  vars:
+    _cluster_name: "{{ hostvars[groups['k8s_control'][0]]['cluster_name'] }}"
+  tasks:
+    - name: Read infrastructure.yaml
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/../../config/infrastructure.yaml"
+      register: infra_raw
+
+    - name: Parse infrastructure.yaml
+      ansible.builtin.set_fact:
+        infra: "{{ infra_raw.content | b64decode | from_yaml }}"
+
+    - name: Find cluster VIP
+      ansible.builtin.set_fact:
+        _cluster: "{{ infra.clusters | selectattr('name', 'equalto', _cluster_name) | first }}"
+        _dns_domain: "{{ infra.platform.proxmox.dns_domain }}"
+
+    - name: Find docker host and vault port
+      ansible.builtin.set_fact:
+        _docker_host: "{{ infra.hosts | selectattr('name', 'equalto', 'docker') | first }}"
+        _vault_port: "{{ (infra.services.instances.vault | first).port }}"
+
+    - name: Set vault URL
+      ansible.builtin.set_fact:
+        _vault_url: "https://{{ _docker_host.connection.host }}:{{ _vault_port }}"
+
+    - name: Get pfSense API key from Vault
+      community.hashi_vault.vault_kv2_get:
+        url: "{{ _vault_url }}"
+        path: infraops/pfsense
+        validate_certs: false
+      register: vault_pfsense
+
+    - name: Find DNS server host
+      ansible.builtin.set_fact:
+        _dns_host: "{{ infra.hosts | selectattr('services', 'defined') | selectattr('services', 'contains', 'dns') | first }}"
+        _ip_pool: "{{ infra.hosts | selectattr('services', 'defined') | selectattr('services', 'contains', 'dns') | first }}"
+
+    - name: Generate IP pool list
+      ansible.builtin.set_fact:
+        _ip_list: "{{ range(_ip_pool.ip_pool.start.split('.')[-1] | int, _ip_pool.ip_pool.end.split('.')[-1] | int + 1) | map('string') | map('regex_replace', '^(.*)', _ip_base ~ '.\\1') | list }}"
+      vars:
+        _ip_base: "{{ _ip_pool.ip_pool.start.split('.')[:3] | join('.') }}"
+
+    - name: Retrieve all DNS Resolver Host Overrides
+      pfrest.pfsense.services_dns_resolver_host_overrides_info:
+        api_host: "{{ _dns_host.connection.host }}"
+        api_key: "{{ vault_pfsense.secret.api_key }}"
+        api_protocol: https
+        validate_certs: false
+      register: dns_result
+
+    - name: Set pool overrides fact
+      ansible.builtin.set_fact:
+        pfsense_host: "{{ _dns_host.connection.host }}"
+        pfsense_api_key: "{{ vault_pfsense.secret.api_key }}"
+        ip_pool: "{{ _ip_pool.ip_pool }}"
+        ip_list: "{{ _ip_list }}"
+        pool_overrides: "{{ dns_result.data | selectattr('ip', 'defined') | selectattr('ip.0', 'in', _ip_list) | list | sort(attribute='ip') }}"
+
+    - name: Create API DNS entry
+      ansible.builtin.include_tasks: tasks/add-host.yaml
+      vars:
+        target_item:
+          hostname: "k8s-{{ _cluster_name }}-api"
+          domain: "{{ _dns_domain }}"
+          ip: "{{ _cluster.control_plane.vip }}"

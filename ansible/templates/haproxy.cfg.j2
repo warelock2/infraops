@@ -1,0 +1,26 @@
+global
+  log /dev/log local0
+  chroot /var/lib/haproxy
+  stats socket /run/haproxy/admin.sock mode 660 level admin
+  stats timeout 30s
+  user haproxy
+  group haproxy
+  daemon
+
+defaults
+  log global
+  mode tcp
+  option dontlognull
+  timeout connect 5s
+  timeout client 30s
+  timeout server 30s
+
+frontend k8s_api
+  bind *:6443
+  default_backend k8s_api_backends
+
+backend k8s_api_backends
+  balance roundrobin
+{% for peer in groups['k8s_control'] | sort %}
+  server {{ peer }} {{ hostvars[peer]['node_ip'] }}:6444 check
+{% endfor %}
