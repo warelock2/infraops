@@ -30,11 +30,11 @@ terraform {
 provider "proxmox" {
   endpoint  = var.proxmox_endpoint
   api_token = var.proxmox_api_token
-  insecure  = try(yamldecode(file("${path.root}/config/infrastructure.yaml")).platform.proxmox.tls_self_signed, false)
+  insecure  = try(yamldecode(file("${path.root}/../config/infrastructure.yaml")).platform.proxmox.tls_self_signed, false)
 }
 
 locals {
-  infra = yamldecode(file("${path.root}/config/infrastructure.yaml"))
+  infra = yamldecode(file("${path.root}/../config/infrastructure.yaml"))
 
   managed_clusters = [
     for c in local.infra.clusters : c
@@ -108,19 +108,19 @@ resource "terraform_data" "dns_alloc" {
   }
 
   provisioner "local-exec" {
-    command = "ansible-playbook ${path.root}/ansible/playbooks/manage-iac-dns.yaml -e 'workflow=add:${each.key}'"
+    command = "ansible-playbook ${path.root}/../ansible/playbooks/manage-iac-dns.yaml -e 'workflow=add:${each.key}'"
   }
 
   provisioner "local-exec" {
     when    = destroy
-    command = "ansible-playbook ${path.root}/ansible/playbooks/manage-iac-dns.yaml -e 'workflow=delete:${each.key}'"
+    command = "ansible-playbook ${path.root}/../ansible/playbooks/manage-iac-dns.yaml -e 'workflow=delete:${each.key}'"
   }
 }
 
 data "external" "dns_lookup" {
   for_each   = local.vms
   depends_on = [terraform_data.dns_alloc]
-  program    = ["sh", "${path.root}/scripts/dns-lookup.sh", "${each.key}.${local.dns_domain}"]
+  program    = ["sh", "${path.root}/../scripts/dns-lookup.sh", "${each.key}.${local.dns_domain}"]
 }
 
 resource "proxmox_virtual_environment_vm" "vm" {
