@@ -34,13 +34,21 @@ export ANSIBLE_CONFIG=$PWD/ansible/ansible.cfg
 
 cd terraform
 terraform init -reconfigure
-terraform apply -auto-approve -input=false | tee /tmp/tf_apply.log
-if grep -q "Resources: 0 added, 0 changed" /tmp/tf_apply.log; then
+
+terraform plan -detailed-exitcode -input=false >/dev/null 2>&1 && PLAN_RC=0 || PLAN_RC=$?
+
+if [ "$PLAN_RC" -eq 0 ]; then
   echo "Infrastructure unchanged, skipping boot wait"
-else
-  echo "New infrastructure created, waiting 5 minutes for VMs to boot..."
+elif [ "$PLAN_RC" -eq 2 ]; then
+  echo "New infrastructure detected, applying..."
+  terraform apply -auto-approve -input=false
+  echo "Waiting 5 minutes for VMs to boot..."
   sleep 300
+else
+  echo "Terraform plan failed (exit $PLAN_RC), aborting."
+  exit 1
 fi
+
 terraform output -json ansible_inventory > ../ansible/inventory.json
 cd ..
 
