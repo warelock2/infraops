@@ -14,7 +14,7 @@
     - name: Ensure Keycloak admin credentials are available
       ansible.builtin.fail:
         msg: >
-          KEYCLOAK_BOOTSTRAP_ADMIN_USER and KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
+          infra_platform_keycloak_admin_user and KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
           must be set. Export them or add to inventory vars.
       when: not keycloak_auth_username or not keycloak_auth_password
 

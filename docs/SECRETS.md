@@ -10,7 +10,6 @@ Audit of all secrets used by infraops. Last updated: 2026-07-21.
 | `ANSIBLE_SSH_PRIVATE_KEY` | Forgejo Actions uses this to impersonate the Ansible admin for configuration management | Ansible `ansible_ssh_private_key_file` | `ssh-keygen` or copied from existing Ansible admin user account |
 | `ANSIBLE_SSH_PUBLIC_KEY` | Used by `create-proxmox-snippet.sh` to inject the Ansible user's public key into Proxmox cloud-init snippets | Proxmox snippet script | `ssh-keygen` or copied from existing Ansible admin user account |
 | `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | Keycloak uses this to set the initial admin password on first boot | Keycloak container | User manually creates with password generator |
-| `KEYCLOAK_BOOTSTRAP_ADMIN_USER` | Keycloak uses this to set the initial admin username on first boot | Keycloak container | User configures |
 | `K8S_ADMIN_KUBECONFIG` | Terraform enforce-iac workflow uses this to drain removed nodes from the k8s cluster | `k8s-drain-removed-nodes.yaml` | Copy kubeconfig from control plane: `scp ansible@k8s-mushroom-control-01:/etc/kubernetes/admin.conf ~/.kube/config` |
 | `MINIO_ACCESS_KEY` | Terraform stores state in MinIO, rather than the project repo | Terraform S3 backend | MinIO console → Access Keys → Create |
 | `MINIO_SECRET_KEY` | Terraform stores state in MinIO, rather than the project repo | Terraform S3 backend | MinIO console → Access Keys → Create |
