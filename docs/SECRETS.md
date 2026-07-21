@@ -8,8 +8,10 @@ Audit of all secrets used by infraops. Last updated: 2026-07-21.
 |---|---|---|---|
 | `ADMIN_SSH_PUBLIC_KEY` | Ansible uses this to enable passwordless admin login to IaC-managed VMs | Terraform `TF_VAR_admin_ssh_public_key` | `ssh-keygen` or copied from existing Ansible admin user account |
 | `ANSIBLE_SSH_PRIVATE_KEY` | Forgejo Actions uses this to impersonate the Ansible admin for configuration management | Ansible `ansible_ssh_private_key_file` | `ssh-keygen` or copied from existing Ansible admin user account |
-| `KEYCLOAK_ADMIN_PASSWORD` | Keycloak uses this to set the initial admin password on first boot | Keycloak container | User manually creates with password generator |
-| `KEYCLOAK_DB_PASSWORD` | Keycloak uses this to initialize its database on first boot | Keycloak container | User manually creates with password generator |
+| `ANSIBLE_SSH_PUBLIC_KEY` | Used by `create-proxmox-snippet.sh` to inject the Ansible user's public key into Proxmox cloud-init snippets | Proxmox snippet script | `ssh-keygen` or copied from existing Ansible admin user account |
+| `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | Keycloak uses this to set the initial admin password on first boot | Keycloak container | User manually creates with password generator |
+| `KEYCLOAK_BOOTSTRAP_ADMIN_USER` | Keycloak uses this to set the initial admin username on first boot | Keycloak container | User configures |
+| `K8S_ADMIN_KUBECONFIG` | Terraform enforce-iac workflow uses this to drain removed nodes from the k8s cluster | `k8s-drain-removed-nodes.yaml` | Copy kubeconfig from control plane: `scp ansible@k8s-mushroom-control-01:/etc/kubernetes/admin.conf ~/.kube/config` |
 | `MINIO_ACCESS_KEY` | Terraform stores state in MinIO, rather than the project repo | Terraform S3 backend | MinIO console → Access Keys → Create |
 | `MINIO_SECRET_KEY` | Terraform stores state in MinIO, rather than the project repo | Terraform S3 backend | MinIO console → Access Keys → Create |
 | `VAULT_RO_TOKEN` | Terraform and Ansible use this to authenticate to Vault and read secrets (pfSense API key, Proxmox credentials) | Terraform Vault provider, `local-exec` provisioner, Ansible `vault_kv2_get` | `scripts/create_read_only_vault_token_for_check_ip.sh` |
@@ -48,6 +50,6 @@ Audit of all secrets used by infraops. Last updated: 2026-07-21.
 - **Forgejo secrets**: Managed via Forgejo UI. Rotate on compromise or personnel change.
 - **Vault tokens**: Created manually via `vault token create`. Rotate periodically. Do not store on disk.
 - **pfSense API key**: Regenerate in pfSense UI → System → KeyAuth, then update `secret/infraops/pfsense`.
-- **Proxmox API token**: Regenerate in Proxmox UI → Datacenter → Permissions → API Tokens, then update `secret/infraops/proxmox` and optionally `PROXMOX_API_TOKEN` Forgejo secret.
+- **Proxmox API token**: Stored in Vault at `secret/infraops/proxmox`. Regenerate in Proxmox UI → Datacenter → Permissions → API Tokens, then update Vault.
 - **Keycloak**: Bootstrap temporary — change in Keycloak on first admin login.
 - **SSH key for snippet script**: Copy `ansible/ansible.pub` and `ansible/create-proxmox-snippet.sh` to the Proxmox server, then run the script as `sudo root` on the Proxmox server.
