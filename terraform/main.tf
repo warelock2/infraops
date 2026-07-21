@@ -9,6 +9,10 @@ terraform {
       source  = "hashicorp/external"
       version = "~> 2.3"
     }
+    vault = {
+      source  = "hashicorp/vault"
+      version = "~> 4.0"
+    }
   }
 
   backend "s3" {
@@ -27,9 +31,15 @@ terraform {
   }
 }
 
+provider "vault" {}
+
+data "vault_generic_secret" "proxmox" {
+  path = "secret/infraops/proxmox"
+}
+
 provider "proxmox" {
-  endpoint  = var.proxmox_endpoint
-  api_token = var.proxmox_api_token
+  endpoint  = data.vault_generic_secret.proxmox.data["endpoint"]
+  api_token = data.vault_generic_secret.proxmox.data["api_token"]
   insecure  = try(yamldecode(file("${path.root}/../config/infrastructure.yaml")).platform.proxmox.tls_self_signed, false)
 }
 
