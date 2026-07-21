@@ -60,6 +60,9 @@ jobs:
             cd terraform &&
             terraform init &&
             terraform validate -no-color"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
 
       - name: Terraform Plan
         uses: docker://alpine/ansible:latest
