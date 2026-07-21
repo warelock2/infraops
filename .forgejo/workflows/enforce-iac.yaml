@@ -58,6 +58,7 @@ jobs:
             curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
             unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
             cd terraform &&
+            terraform init &&
             terraform validate -no-color"
 
       - name: Terraform Plan
@@ -69,6 +70,7 @@ jobs:
             curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
             unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
             cd terraform &&
+            terraform init &&
             terraform plan -no-color -input=false"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
