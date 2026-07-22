@@ -1,0 +1,39 @@
+---
+- name: "Check immutable status"
+  hosts: all
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Check if version file exists
+      ansible.builtin.stat:
+        path: /etc/infraops/version
+      register: version_file
+
+    - name: Set skip_configuration fact
+      ansible.builtin.set_fact:
+        skip_configuration: false
+
+    - name: Read current version info
+      ansible.builtin.slurp:
+        src: /etc/infraops/version
+      register: version_content
+      when: version_file.stat.exists
+
+    - name: Decode version content
+      ansible.builtin.set_fact:
+        current_version: "{{ version_content.content | b64decode | from_json }}"
+      when: version_file.stat.exists
+
+    - name: Check if host is immutable
+      ansible.builtin.set_fact:
+        skip_configuration: true
+      when: >
+        current_version is defined and
+        current_version.immutable | default(false) | bool
+
+    - name: Log immutable status
+      ansible.builtin.debug:
+        msg: >
+          Host {{ inventory_hostname }}: immutable={{
+          current_version.immutable | default(false) }},
+          skip_configuration={{ skip_configuration }}

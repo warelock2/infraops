@@ -1,6 +1,6 @@
 ---
 - name: "Create admin user on all nodes"
-  hosts: k8s_control:k8s_worker
+  hosts: k8s_control:k8s_worker:docker_services
   become: yes
   gather_facts: false
   tasks:

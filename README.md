@@ -1,6 +1,8 @@
 # InfraOps
 
-Infrastructure as Code for on-prem Kubernetes clusters.
+Infrastructure as Code, flowing from a single, multi-tool source of truth.
+
+**License:** GPLv3 — see [LICENSE.md](LICENSE.md) for full terms.
 
 ## Quick Start
 
