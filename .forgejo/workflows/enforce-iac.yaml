@@ -36,15 +36,9 @@ jobs:
             python scripts/render-infra.py"
 
       - name: Terraform Init
-        uses: docker://alpine/ansible:latest
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: >
-            sh -c "apk add --no-cache -q curl unzip yq &&
-            TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
-            curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
-            unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
-            cd terraform &&
-            terraform init"
+          args: sh -c "cd terraform && terraform init"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
@@ -53,16 +47,9 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       - name: Terraform Validate
-        uses: docker://alpine/ansible:latest
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: >
-            sh -c "apk add --no-cache -q curl unzip yq &&
-            TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
-            curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
-            unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
-            cd terraform &&
-            terraform init &&
-            terraform validate -no-color"
+          args: sh -c "cd terraform && terraform init && terraform validate -no-color"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
@@ -71,16 +58,9 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       - name: Terraform Plan
-        uses: docker://alpine/ansible:latest
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: >
-            sh -c "apk add --no-cache -q curl unzip yq &&
-            TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
-            curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
-            unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
-            cd terraform &&
-            terraform init &&
-            terraform plan -no-color -input=false"
+          args: sh -c "cd terraform && terraform init && terraform plan -no-color -input=false"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
@@ -132,14 +112,10 @@ jobs:
 
       - name: K8s Generate Inventory
         if: github.ref == 'refs/heads/master'
-        uses: docker://alpine/ansible:latest
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c "apk add --no-cache -q curl unzip yq &&
-            TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
-            curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
-            unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
-            cd terraform &&
+            sh -c "cd terraform &&
             terraform init -reconfigure &&
             terraform output -json ansible_inventory > ../ansible/inventory.json"
         env:

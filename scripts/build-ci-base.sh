@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="docker.localdomain:3000/warelock/ci-base:latest"
+IMAGE="forgejo.afobl.com/warelock/ci-base:latest"
 DOCKERFILE="docker/ci-base/Dockerfile"
 
 cd "$(dirname "$0")/.."
 
-docker login docker.localdomain:3000
+docker login forgejo.afobl.com
 
 echo "Building $IMAGE from $DOCKERFILE..."
 docker build -t "$IMAGE" -f "$DOCKERFILE" docker/ci-base/
