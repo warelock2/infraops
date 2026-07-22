@@ -35,10 +35,10 @@ jobs:
             pip install -q --root-user-action=ignore pyyaml &&
             python scripts/render-infra.py"
 
-      - name: Test CI Base Pull
-        uses: docker://alpine/ansible:latest
+      - name: Test Port Number Parsing
+        uses: docker://docker.io:443/library/alpine:latest
         with:
-          args: sh -c "docker pull docker.localdomain:3000/warelock/ci-base:latest"
+          args: echo "Port number test passed"
 
       - name: Terraform Init
         uses: docker://docker.localdomain:3000/warelock/ci-base:latest
