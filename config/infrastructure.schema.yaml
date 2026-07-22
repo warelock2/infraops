@@ -194,7 +194,6 @@ properties:
 
   clusters:
     type: array
-    minItems: 1
     description: Kubernetes cluster definitions
     items:
       type: object
@@ -441,12 +440,10 @@ properties:
       instances:
         type: object
         description: Service instance definitions grouped by service name
-        minProperties: 1
         additionalProperties: false
         patternProperties:
           "^[a-z][a-z0-9_-]*$":
             type: array
-            minItems: 1
             items:
               type: object
               additionalProperties: false
