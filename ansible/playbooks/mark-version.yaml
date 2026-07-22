@@ -1,0 +1,24 @@
+---
+- name: "Mark version on all nodes"
+  hosts: all
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Ensure /etc/infraops directory exists
+      ansible.builtin.file:
+        path: /etc/infraops
+        state: directory
+        mode: "0755"
+
+    - name: Write version file
+      ansible.builtin.copy:
+        content: |
+          {
+            "git_commit": "{{ git_commit | default('unknown') }}",
+            "git_tag": "{{ git_tag | default('unknown') }}",
+            "infrastructure_hash": "{{ infrastructure_hash | default('unknown') }}",
+            "immutable": {{ immutable | default(false) | to_json }},
+            "configured_at": "{{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ')) }}"
+          }
+        dest: /etc/infraops/version
+        mode: "0644"

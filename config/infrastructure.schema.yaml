@@ -209,6 +209,10 @@ properties:
           type: string
           format: uri
           description: OIDC issuer URL override for this cluster
+        immutable:
+          type: boolean
+          default: false
+          description: When true, configuration management skips this cluster and monitors for break-glass access
         enforcement:
           type: array
           items:
@@ -401,6 +405,34 @@ properties:
             type: string
             enum: [infrastructure_provisioning, configuration_management]
           description: Enforcement policies for this host
+        immutable:
+          type: boolean
+          default: false
+          description: When true, configuration management skips this host and monitors for break-glass access
+        vm:
+          type: object
+          description: VM configuration overrides for Terraform provisioning
+          additionalProperties: false
+          properties:
+            vm_id:
+              type: integer
+              minimum: 100
+              description: Proxmox VM ID for this host
+            cores:
+              type: integer
+              minimum: 1
+              description: CPU cores override
+            memory_gb:
+              type: integer
+              minimum: 1
+              description: Memory (GB) override
+            disk_gb:
+              type: integer
+              minimum: 1
+              description: Disk size (GB) override
+            datastore:
+              type: string
+              description: Datastore override
         connection:
           type: object
           description: SSH connection details

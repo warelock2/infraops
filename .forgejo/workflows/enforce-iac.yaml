@@ -58,15 +58,39 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       - name: Terraform Plan
+        id: plan
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: sh -c "cd terraform && terraform init && terraform plan -no-color -input=false"
+          args: >
+            sh -c "cd terraform && terraform init &&
+            set +e &&
+            terraform plan -detailed-exitcode -no-color -input=false > /tmp/plan_output.txt 2>&1 &&
+            PLAN_EXIT=\$? &&
+            set -e &&
+            echo \"plan_exit=\$PLAN_EXIT\" >> \$GITHUB_OUTPUT &&
+            cat /tmp/plan_output.txt"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
           VAULT_ADDR: https://docker.localdomain:8200
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+
+      - name: Check for Infrastructure Changes
+        id: changes
+        if: github.ref == 'refs/heads/master'
+        uses: docker://python:3.12-alpine
+        with:
+          args: >
+            sh -c "PLAN_EXIT=\${PLAN_EXIT:-0} &&
+            if [ \"\$PLAN_EXIT\" = \"2\" ]; then
+              echo 'changed=true' >> \$GITHUB_OUTPUT
+            else
+              echo 'changed=false' >> \$GITHUB_OUTPUT
+            fi &&
+            echo \"Infrastructure changes detected: \$(echo \$PLAN_EXIT | grep -q 2 && echo true || echo false)\""
+        env:
+          PLAN_EXIT: ${{ steps.plan.outputs.plan_exit }}
 
       - name: Check Clusters
         id: clusters
@@ -108,7 +132,7 @@ jobs:
         with:
           args: >
             sh -c "
-            pip install --break-system-packages hvac pfsense-vshell &&
+            pip install --break-system-packages --root-user-action=ignore hvac pfsense-vshell &&
             ansible-galaxy collection install pfrest.pfsense community.hashi_vault &&
             cd terraform &&
             terraform init -reconfigure &&
@@ -120,22 +144,23 @@ jobs:
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
-      - name: K8s Generate Inventory
+      - name: Wait for VMs to Boot
+        if: github.ref == 'refs/heads/master' && steps.changes.outputs.changed == 'true'
+        uses: docker://alpine:latest
+        with:
+          args: >
+            sh -c "echo 'Infrastructure changes detected. Waiting 5 minutes for cloud-init to complete...' &&
+            sleep 300 &&
+            echo 'Wait complete.'"
+
+      - name: Generate Ansible Inventory
         if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c "cd terraform &&
-            terraform init -reconfigure &&
-            terraform output -json ansible_inventory > ../ansible/inventory.json"
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          VAULT_ADDR: https://docker.localdomain:8200
-          VAULT_SKIP_VERIFY: "true"
-          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+            sh -c "python3 scripts/generate-inventory.py --output ansible/inventory.json"
 
-      - name: K8s Cluster Bootstrap
+      - name: Configuration Management
         if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true'
         uses: docker://alpine/ansible:latest
         with:
@@ -154,7 +179,9 @@ jobs:
             SERVICE_HOST=$(yq .defaults.service_host config/infrastructure.yaml) &&
             DNS_DOMAIN=$(yq .platform.proxmox.dns_domain config/infrastructure.yaml) &&
             SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}" &&
-            ansible-playbook -i ansible/inventory.json ansible/playbooks/k8s-cluster.yaml
+            GIT_COMMIT="${GITHUB_SHA::8}" &&
+            GIT_TAG="${GITHUB_REF_NAME}" &&
+            ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml
             --private-key /tmp/ansible_key
             -e infra_platform_kubernetes_version=$(yq .platform.kubernetes.version config/infrastructure.yaml)
             -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr config/infrastructure.yaml)
@@ -162,7 +189,9 @@ jobs:
             -e infra_service_domain=$SERVICE_DOMAIN
             -e infra_admin_user=$(yq .platform.admin.user config/infrastructure.yaml)
             -e infra_admin_group=$(yq .platform.admin.group config/infrastructure.yaml)
-            -e infra_ssh_key_file=/tmp/ssh_key.pub'
+            -e infra_ssh_key_file=/tmp/ssh_key.pub
+            -e git_commit=$GIT_COMMIT
+            -e git_tag=$GIT_TAG'
         env:
           ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
           ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
