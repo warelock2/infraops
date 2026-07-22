@@ -36,15 +36,9 @@ jobs:
             python scripts/render-infra.py"
 
       - name: Terraform Init
-        uses: docker://alpine/ansible:latest
+        uses: docker://docker.localdomain:3000/warelock/ci-base:latest
         with:
-          args: >
-            sh -c "apk add --no-cache -q curl unzip yq &&
-            TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
-            curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
-            unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
-            cd terraform &&
-            terraform init"
+          args: sh -c "cd terraform && terraform init"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
@@ -53,16 +47,9 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       - name: Terraform Validate
-        uses: docker://alpine/ansible:latest
+        uses: docker://docker.localdomain:3000/warelock/ci-base:latest
         with:
-          args: >
-            sh -c "apk add --no-cache -q curl unzip yq &&
-            TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
-            curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
-            unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
-            cd terraform &&
-            terraform init &&
-            terraform validate -no-color"
+          args: sh -c "cd terraform && terraform init && terraform validate -no-color"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
@@ -71,29 +58,22 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       - name: Terraform Plan
-        uses: docker://alpine/ansible:latest
+        uses: docker://docker.localdomain:3000/warelock/ci-base:latest
         with:
-          args: >
-            sh -c "apk add --no-cache -q curl unzip yq &&
-            TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
-            curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
-            unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
-            cd terraform &&
-            terraform init &&
-            terraform plan -no-color -input=false"
+          args: sh -c "cd terraform && terraform init && terraform plan -no-color -input=false"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
           VAULT_ADDR: https://docker.localdomain:8200
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+
       - name: K8s Drain Removed Nodes
         if: github.ref == 'refs/heads/master'
-        uses: docker://alpine/ansible:latest
+        uses: docker://docker.localdomain:3000/warelock/ci-base:latest
         with:
           args: >
             sh -c "
-            apk add -q curl yq &&
             K8S_VERSION=$(yq .platform.kubernetes.version config/infrastructure.yaml) &&
             curl -sLO https://dl.k8s.io/release/v${K8S_VERSION}/bin/linux/amd64/kubectl &&
             chmod +x kubectl &&
@@ -131,14 +111,10 @@ jobs:
 
       - name: K8s Generate Inventory
         if: github.ref == 'refs/heads/master'
-        uses: docker://alpine/ansible:latest
+        uses: docker://docker.localdomain:3000/warelock/ci-base:latest
         with:
           args: >
-            sh -c "apk add --no-cache -q curl unzip yq &&
-            TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
-            curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
-            unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
-            cd terraform &&
+            sh -c "cd terraform &&
             terraform init -reconfigure &&
             terraform output -json ansible_inventory > ../ansible/inventory.json"
         env:
@@ -150,14 +126,10 @@ jobs:
 
       - name: K8s Cluster Bootstrap
         if: github.ref == 'refs/heads/master'
-        uses: docker://alpine/ansible:latest
+        uses: docker://docker.localdomain:3000/warelock/ci-base:latest
         with:
           args: >
-            sh -c 'apk add -q yq py3-pip &&
-            pip3 install -q --break-system-packages --root-user-action=ignore hvac &&
-            ansible-galaxy collection install
-            kubernetes.core community.general ansible.posix
-            community.hashi_vault pfrest.pfsense --force &&
+            sh -c '
             if [ -z "$ADMIN_SSH_PUBLIC_KEY" ]; then echo "ERROR: ADMIN_SSH_PUBLIC_KEY not set" && exit 1; fi &&
             if [ -z "$ANSIBLE_SSH_PRIVATE_KEY" ]; then echo "ERROR: ANSIBLE_SSH_PRIVATE_KEY not set" && exit 1; fi &&
             echo "$ADMIN_SSH_PUBLIC_KEY" > /tmp/ssh_key.pub &&
