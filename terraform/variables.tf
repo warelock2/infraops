@@ -16,6 +16,12 @@ variable "dns_domain" {
   default     = null
 }
 
+variable "vault_address" {
+  description = "Vault server address"
+  type        = string
+  default     = "https://docker.localdomain:8200"
+}
+
 variable "template_id" {
   description = "Template VM ID to clone from (defaults to infrastructure.yaml platform.proxmox.template_id)"
   type        = number
