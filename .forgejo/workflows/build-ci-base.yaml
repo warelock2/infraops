@@ -1,0 +1,23 @@
+name: Build CI Base Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'docker/ci-base/Dockerfile'
+
+jobs:
+  build:
+    runs-on: docker
+    steps:
+      - name: Checkout
+        uses: https://code.forgejo.org/actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Build and push CI base image
+        run: |
+          docker build -t docker.localdomain:3000/warelock/ci-base:latest docker/ci-base/
+          docker push docker.localdomain:3000/warelock/ci-base:latest
