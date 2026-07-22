@@ -41,7 +41,8 @@ defaults:
     workers:
       plane_name: worker
 
-clusters:
+clusters: []
+#clusters:
 #  - name: mushroom
 #    enforcement:
 #      - infrastructure_provisioning
