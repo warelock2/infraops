@@ -68,8 +68,18 @@ jobs:
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
-      - name: K8s Drain Removed Nodes
+      - name: Check Clusters
+        id: clusters
         if: github.ref == 'refs/heads/master'
+        uses: docker://python:3.12-alpine
+        with:
+          args: >
+            sh -c "apk add -q yq &&
+            CLUSTERS=$(yq '.clusters | length' config/infrastructure.yaml) &&
+            echo \"has_clusters=$([ \"$CLUSTERS\" -gt 0 ] && echo true || echo false)\" >> $GITHUB_OUTPUT"
+
+      - name: K8s Drain Removed Nodes
+        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true'
         uses: docker://alpine/ansible:latest
         with:
           args: >
@@ -111,7 +121,7 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       - name: K8s Generate Inventory
-        if: github.ref == 'refs/heads/master'
+        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
@@ -126,7 +136,7 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       - name: K8s Cluster Bootstrap
-        if: github.ref == 'refs/heads/master'
+        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true'
         uses: docker://alpine/ansible:latest
         with:
           args: >
