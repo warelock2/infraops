@@ -1,6 +1,6 @@
 ---
 - name: "Check immutable status"
-  hosts: all
+  hosts: all:!firewall
   become: yes
   gather_facts: false
   tasks:

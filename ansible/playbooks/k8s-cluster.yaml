@@ -482,14 +482,15 @@
         delay: 5
         timeout: 120
 
-    - name: Get join command from control plane
-      ansible.builtin.set_fact:
-        k8s_join_command: "{{ hostvars[(groups['k8s_control'] | sort)[0]]['k8s_join_command'] }}"
-
     - name: Check if node already joined
       ansible.builtin.stat:
         path: /etc/kubernetes/kubelet.conf
       register: k8s_kubelet_conf
+
+    - name: Get join command from control plane
+      ansible.builtin.set_fact:
+        k8s_join_command: "{{ hostvars[(groups['k8s_control'] | sort)[0]]['k8s_join_command'] }}"
+      when: not k8s_kubelet_conf.stat.exists
 
     - name: Join the cluster
       ansible.builtin.shell:
