@@ -183,6 +183,8 @@ resource "proxmox_virtual_environment_vm" "vm" {
       condition     = length(local.vm_id_overlap_violations) == 0
       error_message = "VM ID overlap detected: ${join(", ", [for v in local.vm_id_overlap_violations : v.message])}"
     }
+
+    ignore_changes = [initialization]
   }
 
   agent {
@@ -282,6 +284,8 @@ resource "proxmox_virtual_environment_vm" "standalone" {
       condition     = length(local.vm_id_overlap_violations) == 0
       error_message = "VM ID overlap detected: ${join(", ", [for v in local.vm_id_overlap_violations : v.message])}"
     }
+
+    ignore_changes = [initialization]
   }
 
   agent {
