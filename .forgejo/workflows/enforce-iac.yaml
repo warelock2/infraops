@@ -142,15 +142,6 @@ jobs:
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
-      - name: Wait for VMs to Boot
-        if: github.ref == 'refs/heads/master' && steps.changes.outputs.changed == 'true'
-        uses: docker://alpine:latest
-        with:
-          args: >
-            sh -c "echo 'Infrastructure changes detected. Waiting 5 minutes for cloud-init to complete...' &&
-            sleep 300 &&
-            echo 'Wait complete.'"
-
       - name: Generate Ansible Inventory
         if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
