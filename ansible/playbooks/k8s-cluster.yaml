@@ -259,7 +259,7 @@
   gather_facts: no
   connection: local
   vars:
-    _cluster_name: "{{ hostvars[groups['k8s_control'][0]]['cluster_name'] }}"
+    _cluster_name: "{{ groups['k8s_control'][0] | regex_replace('^k8s-(.+)-(?:control|worker)-\\d+$', '\\1') }}"
   tasks:
     - name: Read infrastructure.yaml
       ansible.builtin.slurp:
