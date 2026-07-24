@@ -4,6 +4,15 @@
   become: yes
   gather_facts: false
   tasks:
+    - name: Wait for cloud-init reboot to complete
+      ansible.builtin.command: test -f /var/run/have_not_yet_rebooted
+      register: flag_check
+      until: flag_check.rc != 0
+      retries: 60
+      delay: 10
+      failed_when: false
+      when: inventory_hostname is match('^k8s-.+-(?:control|worker)-\\d+$')
+
     - name: Wait for SSH
       ansible.builtin.wait_for_connection:
         delay: 10

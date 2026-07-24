@@ -1,6 +1,11 @@
 #cloud-config
 package_update: true
 
+write_files:
+  - path: /var/run/have_not_yet_rebooted
+    content: "cloud-init is running"
+    permissions: "0644"
+
 bootcmd:
   - swapoff -a
   - sed -i '/ swap / s/^/#/' /etc/fstab
@@ -12,3 +17,8 @@ runcmd:
   - systemctl enable qemu-guest-agent
   - systemctl start qemu-guest-agent
   - netplan apply
+
+power_state:
+  mode: reboot
+  delay: 1
+  condition: "test -f /var/lib/cloud/instance/boot-finished"
