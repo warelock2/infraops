@@ -14,6 +14,7 @@ docker build -t "$IMAGE" -f "$DOCKERFILE" docker/ci-base/
 echo "Pushing $IMAGE..."
 docker push "$IMAGE"
 
+shred -u ~/.docker/config.json
 cp ~/.docker/config.json.empty ~/.docker/config.json
 
 echo "Done: $IMAGE"
