@@ -32,7 +32,8 @@ runcmd:
   - >
     ACTUAL_IF=$(ip route show default | awk '{print $5}' | head -1) &&
     sed -i "s/eth0/$ACTUAL_IF/g" /etc/netplan/50-cloud-init.yaml &&
-    sed -i '/match:/,/set-name:/d' /etc/netplan/50-cloud-init.yaml &&
+    sed -i '/match:/,+1d' /etc/netplan/50-cloud-init.yaml &&
+    sed -i '/set-name:/d' /etc/netplan/50-cloud-init.yaml &&
     netplan apply
 
 power_state:
