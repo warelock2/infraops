@@ -32,7 +32,7 @@ defaults:
   gateway: "192.168.0.1"
   vm:
     cores: 2
-    memory_gb: 8
+    memory_gb: 4
     disk_gb: 32
     datastore: RAIDZ
   planes:
@@ -91,8 +91,6 @@ services:
     keycloak:
       - name: keycloak
         port: 8443
-      - name: kctest
-        port: 8444
     minio:
       - name: minio
         port: 9000
