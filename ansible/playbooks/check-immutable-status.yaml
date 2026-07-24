@@ -4,6 +4,11 @@
   become: yes
   gather_facts: false
   tasks:
+    - name: Wait for SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+      ignore_errors: yes
+
     - name: Check if version file exists
       ansible.builtin.stat:
         path: /etc/infraops/version
