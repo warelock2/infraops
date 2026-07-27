@@ -1,4 +1,2 @@
 ---
-- import_playbook: check-immutable-status.yaml
 - import_playbook: k8s-cluster.yaml
-- import_playbook: mark-version.yaml
