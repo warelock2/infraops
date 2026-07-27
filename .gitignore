@@ -42,3 +42,6 @@ id_rsa*
 .terraform/
 .terraform.lock.hcl
 !terraform/.terraform.lock.hcl
+
+setpw.sh
+certs/
