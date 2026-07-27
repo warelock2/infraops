@@ -34,7 +34,7 @@ cp "$IMG_DIR/$CLOUDIMG_FILE" "$IMG_DIR/$GOLDENIMG_FILE"
 virt-customize -a "$IMG_DIR/$GOLDENIMG_FILE" \
   --mkdir /usr/local/bin \
   --upload /tmp/nats:/usr/local/bin/nats \
-  --chmod /usr/local/bin/nats:0755
+  --chmod 0755:/usr/local/bin/nats
 rm -f /tmp/nats
 
 # Create the pre-template VM
