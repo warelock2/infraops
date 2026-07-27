@@ -120,8 +120,7 @@ jobs:
         if: github.ref == 'refs/heads/master'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: >
-            sh -c '
+          args: |
             set -e
 
             echo "=== Reading NATS password from Vault ==="
@@ -141,7 +140,6 @@ jobs:
               --filter="infraops.helloworld" \
               --replay=instant --max-deliver=-1 --max-pending=-1 \
               --defaults --context=iac-orchestrator
-            '
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/master'
@@ -159,11 +157,11 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       - name: Wait for VM Readiness Signals
+        id: wait-for-signals
         if: github.ref == 'refs/heads/master'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: >
-            sh -c '
+          args: |
             set -e
 
             echo "=== Reading NATS password from Vault ==="
@@ -275,14 +273,12 @@ jobs:
             done
             echo "failed_vms=$FAILED_VMS" >> "$GITHUB_OUTPUT"
             exit 1
-            '
 
       - name: Destroy Failed VMs
         if: github.ref == 'refs/heads/master' && failure() && steps.wait-for-signals.outputs.ready == 'false'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: >
-            sh -c '
+          args: |
             set -e
             echo "=== Reading Proxmox credentials from Vault ==="
             export VAULT_ADDR="https://vault.afobl.com"
@@ -317,7 +313,6 @@ jobs:
             cd terraform
             terraform init -reconfigure
             terraform apply -auto-approve -no-color -input=false -parallelism=1
-            '
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
