@@ -116,6 +116,34 @@ jobs:
         with:
           args: sh -c "chmod -R a+rwx terraform/.terraform"
 
+      - name: Ensure Readiness Poller Consumer Exists
+        if: github.ref == 'refs/heads/master'
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
+        with:
+          args: >
+            sh -c '
+            set -e
+
+            echo "=== Reading NATS password from Vault ==="
+            export VAULT_ADDR="https://docker.localdomain:8200"
+            export VAULT_SKIP_VERIFY="true"
+            export VAULT_TOKEN="${{ secrets.VAULT_RO_TOKEN }}"
+            NATS_IAC_PASSWORD=$(vault kv get -format=json secret/infraops/nats | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['data']['iac_orchestrator_password'])")
+
+            echo "=== Setting up nats context ==="
+            nats context add iac-orchestrator \
+              --server tls://midas.afobl.com:4222 \
+              --user iac-orchestrator --password "$NATS_IAC_PASSWORD" \
+              --tlsca certs/afobl.com.ca
+
+            echo "=== Ensuring readiness-poller consumer exists ==="
+            nats consumer add infraops readiness-poller \
+              --pull --ack=explicit --deliver=all \
+              --filter="infraops.helloworld" \
+              --replay=instant --max-deliver=-1 --max-pending=-1 \
+              --defaults --context=iac-orchestrator
+            '
+
       - name: Terraform Apply
         if: github.ref == 'refs/heads/master'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
