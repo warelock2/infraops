@@ -1,0 +1,223 @@
+#cloud-config
+package_update: true
+
+packages:
+  - qemu-guest-agent
+  - nats-cli
+
+write_files:
+  - path: /etc/systemd/system/helloworld.service
+    content: |
+      [Unit]
+      Description=VM Readiness Signal
+      After=cloud-init.service network-online.target sshd.service
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/helloworld.sh
+      RemainAfterExit=no
+
+      [Install]
+      WantedBy=multi-user.target
+    permissions: "0644"
+
+  - path: /usr/local/bin/helloworld.sh
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+
+      CONTEXT="vm"
+      SUBJECT="infraops.helloworld"
+      HOSTINFO="/etc/helloworld/hostinfo.txt"
+      MAX_ATTEMPTS=3
+      MAX_REBOOTS=2
+      REBOOT_COUNT_FILE="/var/run/helloworld_reboot_count"
+
+      log() {
+        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) helloworld: $*" >&2
+      }
+
+      read_auth_facts() {
+        AUTH_HOSTNAME=$(grep '^hostname:' "$HOSTINFO" | awk '{print $2}')
+        AUTH_IP=$(grep '^ip:' "$HOSTINFO" | awk '{print $2}')
+        AUTH_VMID=$(grep '^vm_id:' "$HOSTINFO" | awk '{print $2}')
+        log "auth facts: hostname=$AUTH_HOSTNAME ip=$AUTH_IP vmid=$AUTH_VMID"
+      }
+
+      wait_for_cloud_init() {
+        log "waiting for cloud-init to finish..."
+        local count=0
+        while ! test -f /var/lib/cloud/instance/boot-finished; do
+          sleep 5
+          count=$((count + 1))
+          if [ $count -ge 120 ]; then
+            log "timeout waiting for cloud-init (600s)"
+            return 1
+          fi
+        done
+        log "cloud-init finished"
+      }
+
+      validate_and_heal() {
+        local fail=0
+
+        local current_hostname
+        current_hostname=$(hostname)
+        if [ "$current_hostname" != "$AUTH_HOSTNAME" ]; then
+          log "hostname mismatch: have=$current_hostname want=$AUTH_HOSTNAME — fixing"
+          hostnamectl set-hostname "$AUTH_HOSTNAME"
+          fail=1
+        fi
+
+        local resolved_ip
+        resolved_ip=$(getent hosts "$AUTH_HOSTNAME" | awk '{print $1}')
+        if [ "$resolved_ip" != "$AUTH_IP" ]; then
+          log "DNS mismatch: resolved=$resolved_ip want=$AUTH_IP — restarting resolver"
+          systemctl restart systemd-resolved 2>/dev/null || true
+          fail=1
+        fi
+
+        local current_ip
+        current_ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+        if [ "$current_ip" != "$AUTH_IP" ]; then
+          log "IP mismatch: have=$current_ip want=$AUTH_IP — cannot fix, will reboot"
+          fail=1
+        fi
+
+        if ! ip route show default > /dev/null 2>&1; then
+          log "no default route — cannot fix, will reboot"
+          fail=1
+        fi
+
+        if ! systemctl is-active sshd > /dev/null 2>&1; then
+          log "sshd not running — starting"
+          systemctl start sshd
+          systemctl enable sshd
+          fail=1
+        fi
+
+        local nats_ok=0
+        for i in 1 2 3; do
+          if nats server info --context="$CONTEXT" > /dev/null 2>&1; then
+            nats_ok=1
+            break
+          fi
+          log "NATS not reachable, attempt $i/3"
+          sleep 5
+        done
+        if [ $nats_ok -eq 0 ]; then
+          log "NATS unreachable after 3 attempts — cannot fix, will reboot"
+          fail=1
+        fi
+
+        return $fail
+      }
+
+      publish_birth() {
+        TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        PAYLOAD="{\"hostname\":\"$AUTH_HOSTNAME\",\"ip\":\"$AUTH_IP\",\"vmid\":\"$AUTH_VMID\",\"timestamp\":\"$TIMESTAMP\"}"
+        log "publishing birth: $PAYLOAD"
+        nats pub "$SUBJECT" "$PAYLOAD" --context="$CONTEXT" -J
+      }
+
+      self_destruct() {
+        log "self-destructing"
+        systemctl disable helloworld.service 2>/dev/null || true
+        shred -u /root/.nats/vm.creds 2>/dev/null || true
+        shred -u /root/.nats/afobl.com.ca 2>/dev/null || true
+        shred -u /root/.config/nats/context/vm.json 2>/dev/null || true
+        systemctl stop helloworld.service 2>/dev/null || true
+      }
+
+      maybe_reboot() {
+        local reboot_count=0
+        if [ -f "$REBOOT_COUNT_FILE" ]; then
+          reboot_count=$(cat "$REBOOT_COUNT_FILE")
+        fi
+        reboot_count=$((reboot_count + 1))
+        echo "$reboot_count" > "$REBOOT_COUNT_FILE"
+        if [ "$reboot_count" -gt "$MAX_REBOOTS" ]; then
+          log "max reboots ($MAX_REBOOTS) reached — giving up, manual intervention required"
+          exit 1
+        fi
+        log "reboot $reboot_count/$MAX_REBOOTS"
+        reboot
+      }
+
+      # --- main ---
+      log "starting"
+      wait_for_cloud_init || exit 1
+      read_auth_facts
+
+      for attempt in $(seq 1 $MAX_ATTEMPTS); do
+        log "validation attempt $attempt/$MAX_ATTEMPTS"
+        if validate_and_heal; then
+          if publish_birth; then
+            log "birth published successfully"
+            self_destruct
+            exit 0
+          else
+            log "publish failed"
+          fi
+        fi
+        sleep 2
+      done
+
+      maybe_reboot
+    permissions: "0755"
+
+  - path: /root/.nats/afobl.com.ca
+    content: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUUyekNDQXNPZ0F3SUJBZ0lSQUtJQ1UvRmZKcEhBWGNIT0U3bTh5azR3RFFZSktvWklodmNOQVFFTEJRQXcKTGpFTE1Ba0dBMVVFQmhNQ1ZWTXhEVEFMQmdOVkJBb1RCRWxUVWtjeEVEQU9CZ05WQkFNVEIxSnZiM1FnV1ZJdwpIaGNOTWpVd09UQXpNREF3TURBd1doY05Namd3T1RBeU1qTTFPVFU1V2pBek1Rc3dDUVlEVlFRR0V3SlZVekVXCk1CUUdBMVVFQ2hNTlRHVjBKM01nUlc1amNubHdkREVNTUFvR0ExVUVBeE1EV1ZJeE1JSUJJakFOQmdrcWhraUcKOXcwQkFRRUZBQU9DQVE4QU1JSUJDZ0tDQVFFQW9WaThYMnhDWWdNWHZKeE5QS3Avb0YxM1VNZ21QQUJCMDdWQwpMTkR0b1htdDlsdUVaTkpTQlYxMFZ5VDFQejZMRDhacTFkMmdjNDNXTmwxQWRScmo0c0VuYXpiT2l6MG5QcG1HCkJwMmh1aTQ5b1p0RElZNndkS2VaQWk1QmJOVTIwQ0g2UlNCQk1MU1E5Y1hySDhkeGR2NFBBSjQ1c3NHTUw2OFUKU0UzQnNqQzJhNmNBTjlMNUNnWFZJUWk1dGZOaVRQb0ZaWjNTME9sWHFMbW10ZFY5NXVkV0FiNWI2ZS9GNDlEaQpDc0gwWTAwQWc3MkJWSWIxaHp5bm1LZStYMG1FUkJUdHNiM0J3bXBWOWlwZUJqTUxvUi9EOWNIeEhRQ1dvaTVsClRtWHdZMDE1SjVyR2VsejFuWmpKdXhjMmtpb2FYMjlYSkJuaE1rUDUzMXJTZEc1dU13SURBUUFCbzRIdU1JSHIKTUE0R0ExVWREd0VCL3dRRUF3SUJoakFUQmdOVkhTVUVEREFLQmdnckJnRUZCUWNEQVRBU0JnTlZIUk1CQWY4RQpDREFHQVFIL0FnRUFNQjBHQTFVZERnUVdCQlFmTHpXK1JoU0N6VUN4cm5rc1ZYajY5OVJvK3pBZkJnTlZIU01FCkdEQVdnQlRlNTF0ZzBDSnRRQ2g5UHcwQi9xUzFVclJSbERBeUJnZ3JCZ0VGQlFjQkFRUW1NQ1F3SWdZSUt3WUIKQlFVSE1BS0dGbWgwZEhBNkx5OTVjaTVwTG14bGJtTnlMbTl5Wnk4d0V3WURWUjBnQkF3d0NqQUlCZ1puZ1F3QgpBZ0V3SndZRFZSMGZCQ0F3SGpBY29CcWdHSVlXYUhSMGNEb3ZMM2x5TG1NdWJHVnVZM0l1YjNKbkx6QU5CZ2txCmhraUc5dzBCQVFzRkFBT0NBZ0VBMCt6dk1xM2tIaWcxZGRUbW1tK1JpYlRyOS9ScFg3azRidWFuTU1ScWJWL3kKSXZQODJ6QUhOM212YXcrY0FTdVZzZHBkMGlramhyNGhuaEpRTFFPek9wMmNjS3JzZEdPQWdvMHZkZGVJU0ZBcQpFV0VWNGxtVU0zdkZGNzk2dXArYlNnbUoxdTZSdXBEQ014RGdGOE0zZUx2R3VqNkwwbHUzemtRMEt1UUxuS3hMCnRCMG9RcW4xSWRnNUN1dUdwTXZRemsyOVBhM0QvcUh1cmMwRUlNOVN4dWtRdUpxcTYzbHhzWXlSUUZVOHlNQk8KaHExdzVMYmZhV05ScnoxdWtsT2ZJL3BZa0FiMkUyTVRackFNUWtCSUUyUzhKdDFGOGdSYzk2by94T3NyZ3ZTawphODRBaXNYNnhxMWx6MVo3akd2cm5YYzRUTWNqeFpUamlUYWloY1lJMUpJWFppTHRFTVNDYTVsM2N1OFlXZDZ6CmRMUlFscVJkY2xWanVRZk5IYXdSSjZHV2xrSzBRSm9zaXZUS3dkQnczS3hFdHpHbzh5TUhFUmJzeTU3Z1AxVVgKSE9NY21aWVFDMGd0eVIzU3hmZW5JTS9NeEMzSWEyWXBhYi9rUS9DVG5sSW4yS1E1SlVDNk5ZckdDYmhGTjlicAo1bEtKU3RFd0NVbkxwbnRjclhrNVhWRENOdi81UnlXcFJUaGtHT1Y3R2V0S2tRMHFBWThoQ3pXSzZvcW5BaERaCmNqbFlWZFdmcU93M0RJT1g2RUROQmdBcUhhclJWeHlGOVFaZE9hWFN5UEowdWVEMkJZSkVCZ2FDR1E4ckFhVS8KUWMxMjNWNUxUWERaVzRDY3NQQkR5aHk0ditjOGhDbEF5dy9Ja0psZkJxeEI5RCsvd3ZJTUhnRUNaNHB0UDZvPQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+    permissions: "0644"
+
+  - path: /root/.config/nats/context/vm.json
+    content: |
+      {
+        "description": "VM Bootstrap",
+        "url": "tls://midas.afobl.com:4222",
+        "socks_proxy": "",
+        "token": "",
+        "user": "vm",
+        "password": "__NATS_VM_PASSWORD__",
+        "creds": "",
+        "nkey": "",
+        "cert": "",
+        "key": "",
+        "ca": "/root/.nats/afobl.com.ca",
+        "nsc": "",
+        "jetstream_domain": "",
+        "jetstream_api_prefix": "",
+        "jetstream_event_prefix": "",
+        "inbox_prefix": "",
+        "user_jwt": "",
+        "user_seed": "",
+        "color_scheme": "",
+        "tls_first": false,
+        "windows_cert_store": "",
+        "windows_cert_match_by": "",
+        "windows_cert_match": "",
+        "windows_ca_certs_match": null
+      }
+    permissions: "0600"
+
+bootcmd:
+  - swapoff -a
+  - sed -i '/ swap / s/^/#/' /etc/fstab
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - chmod +x /usr/local/bin/helloworld.sh
+  - >
+    mkdir -p /etc/helloworld &&
+    AUTH_HOSTNAME=$(hostname) &&
+    AUTH_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1) &&
+    AUTH_VMID=$(cat /sys/class/dmi/id/product_serial) &&
+    printf "hostname: %s\nip: %s\nvm_id: %s\n" "$AUTH_HOSTNAME" "$AUTH_IP" "$AUTH_VMID" > /etc/helloworld/hostinfo.txt
+  - systemctl enable helloworld.service
+  - >
+    ACTUAL_IF=$(ip route show default | awk '{print $5}' | head -1) &&
+    sed -i "s/eth0/$ACTUAL_IF/g" /etc/netplan/50-cloud-init.yaml &&
+    sed -i '/match:/,+1d' /etc/netplan/50-cloud-init.yaml &&
+    sed -i '/set-name:/d' /etc/netplan/50-cloud-init.yaml &&
+    netplan apply

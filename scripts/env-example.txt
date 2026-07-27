@@ -1,0 +1,11 @@
+# NATS user passwords — generated from Vault
+# Run: ./scripts/generate-env-from-vault.sh > scripts/.env
+# Then: shred -u scripts/.env after template creation
+
+# Vault path: secret/infraops/nats
+# Keys: vm_password, iac_orchestrator_password, app_password, sys_password
+
+NATS_VM_PASSWORD={{VAULT:secret/infraops/nats:vm_password}}
+NATS_IAC_PASSWORD={{VAULT:secret/infraops/nats:iac_orchestrator_password}}
+NATS_APP_PASSWORD={{VAULT:secret/infraops/nats:app_password}}
+NATS_SYS_PASSWORD={{VAULT:secret/infraops/nats:sys_password}}

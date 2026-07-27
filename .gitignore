@@ -2,6 +2,8 @@
 
 RESTART.md
 
+external_projects/
+
 #cloudimg/*
 #!cloudimg/.gitkeep
 
@@ -14,14 +16,16 @@ RESTART.md
 .local
 .npm
 
+# Secrets
 terraform/secrets.auto.tfvars
 terraform/terraform.tfvars
+.env
+scripts/.env
 
 # Junk files from manually running Terraform
 *.tfstate
 *.tfstate.*
 .wget-hsts
-.env
 
 .ansible/
 
