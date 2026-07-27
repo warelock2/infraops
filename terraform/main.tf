@@ -32,7 +32,7 @@ terraform {
 }
 
 provider "vault" {
-  address         = var.vault_address
+  address          = var.vault_address
   skip_child_token = true
 }
 
@@ -137,7 +137,7 @@ locals {
 
   vm_id_overlap_violations = [
     for i in range(length(local.all_vm_ids)) : {
-      id = local.all_vm_ids[i]
+      id      = local.all_vm_ids[i]
       message = "VM ID ${local.all_vm_ids[i]} is used multiple times"
     }
     if length([for j in range(length(local.all_vm_ids)) : local.all_vm_ids[j] if local.all_vm_ids[j] == local.all_vm_ids[i]]) > 1
@@ -242,25 +242,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
       keys     = ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCuRwmKwRFe5YMo1AXZMUBlz2rXWboVpOChnKqY2zm1K/RVhAW98wZNilcvAshvNM3SkywHTMJA2M+CJtVdfpFijARPfY1Hq91dIo1BhG71WtwfmRnG1zz45CouOLmriPV5kh8TkOv4iPJyKY7juA9cVyekgniyynC99nlPMeaJmZ1xGgoEOCBWA3aSOG0TrmLI1AKYx+hVGb1lbMHiLVBrlwuv7UtCNWaPNILRbYLrWeqr2Tr8vf9lXj7aJq/xzTMrfGWRuIvmR+h5zymZFDctRmwfb6cYf4OJP6ztYYrg0VvK/bLkMRTgHx3Pxgobs0giOElAz4SVd+ZjcrM2P1uXYuIWKBzB7rO0sxZp/L0+X7pikDU4mAX5DGOBWECZa8/iajv9hk8GW5sFQDNmeS7evbOhi+rtW50+JZP4UUbXgT/cx0ADdbC2+vJqqIoIOvxuucCl4k5eNznhIqM9RRcS1GabIOtosoojZ9xoYhwu0vsX+FwX3SFp5NXXzl2HV0M= ansible@spacedock"]
     }
 
-    meta_data_file_id = proxmox_virtual_environment_file.meta_data[each.key].id
-
     vendor_data_file_id = "local:snippets/cloud-init-reboot.yaml"
-  }
-}
-
-# Per-VM cloud-init metadata (authoritative facts)
-resource "proxmox_virtual_environment_file" "meta_data" {
-  for_each     = local.vms
-  content_type = "snippets"
-  datastore_id = "local"
-  node_name    = local.proxmox_target_node
-
-  source_raw {
-    data = templatefile("${path.root}/templates/meta-data.yaml.tftpl", {
-      vm_id    = each.value.vm_id
-      hostname = each.key
-    })
-    file_name = "meta-data-${each.key}.yaml"
   }
 }
 
@@ -365,25 +347,7 @@ resource "proxmox_virtual_environment_vm" "standalone" {
       keys     = ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCuRwmKwRFe5YMo1AXZMUBlz2rXWboVpOChnKqY2zm1K/RVhAW98wZNilcvAshvNM3SkywHTMJA2M+CJtVdfpFijARPfY1Hq91dIo1BhG71WtwfmRnG1zz45CouOLmriPV5kh8TkOv4iPJyKY7juA9cVyekgniyynC99nlPMeaJmZ1xGgoEOCBWA3aSOG0TrmLI1AKYx+hVGb1lbMHiLVBrlwuv7UtCNWaPNILRbYLrWeqr2Tr8vf9lXj7aJq/xzTMrfGWRuIvmR+h5zymZFDctRmwfb6cYf4OJP6ztYYrg0VvK/bLkMRTgHx3Pxgobs0giOElAz4SVd+ZjcrM2P1uXYuIWKBzB7rO0sxZp/L0+X7pikDU4mAX5DGOBWECZa8/iajv9hk8GW5sFQDNmeS7evbOhi+rtW50+JZP4UUbXgT/cx0ADdbC2+vJqqIoIOvxuucCl4k5eNznhIqM9RRcS1GabIOtosoojZ9xoYhwu0vsX+FwX3SFp5NXXzl2HV0M= ansible@spacedock"]
     }
 
-    meta_data_file_id = proxmox_virtual_environment_file.standalone_meta_data[each.key].id
-
     vendor_data_file_id = "local:snippets/cloud-init-reboot.yaml"
-  }
-}
-
-# Standalone host cloud-init metadata
-resource "proxmox_virtual_environment_file" "standalone_meta_data" {
-  for_each     = local.standalone_hosts_provision
-  content_type = "snippets"
-  datastore_id = "local"
-  node_name    = local.proxmox_target_node
-
-  source_raw {
-    data = templatefile("${path.root}/templates/meta-data.yaml.tftpl", {
-      vm_id    = each.value.vm.vm_id
-      hostname = each.key
-    })
-    file_name = "meta-data-${each.key}.yaml"
   }
 }
 
