@@ -81,6 +81,15 @@ properties:
             type: string
             pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
             description: Terraform version constraint
+      nats:
+        type: object
+        description: NATS CLI configuration
+        additionalProperties: false
+        properties:
+          cli_version:
+            type: string
+            pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            description: NATS CLI version to install in golden template and CI image
       proxmox:
         type: object
         description: Proxmox VE host configuration
