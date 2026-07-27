@@ -26,7 +26,7 @@ terraform {
     use_path_style              = true
 
     endpoints = {
-      s3 = "http://minio.afobl.com"
+      s3 = "http://minio.afobl.com:9000"
     }
   }
 }
