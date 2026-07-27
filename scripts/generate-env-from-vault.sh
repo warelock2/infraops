@@ -25,7 +25,7 @@ if [[ -z "${VAULT_TOKEN:-}" ]]; then
 fi
 
 if [[ -z "${VAULT_ADDR:-}" ]]; then
-  export VAULT_ADDR="https://docker.localdomain:8200"
+  export VAULT_ADDR="https://vault.afobl.com"
 fi
 
 export VAULT_SKIP_VERIFY=true

@@ -13,9 +13,11 @@ platform:
     version: "1.33.0"
     pod_network_cidr: "10.244.0.0/16"
     calico_version: "v3.29.2"
-    oidc_issuer_url: "https://docker.localdomain:8443/realms/infraops"
+    oidc_issuer_url: "https://keycloak.afobl.com/realms/infraops"
   terraform:
     version: "1.7.5"
+  nats:
+    cli_version: "0.4.0"
   proxmox:
     node: utopiaplanitia
     template_id: 8000

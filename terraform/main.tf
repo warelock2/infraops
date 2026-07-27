@@ -26,7 +26,7 @@ terraform {
     use_path_style              = true
 
     endpoints = {
-      s3 = "http://docker.localdomain:9000"
+      s3 = "http://minio.afobl.com"
     }
   }
 }

@@ -10,9 +10,32 @@ TEMPLATE_NET0="vmbr0"
 IMG_DIR="/home/warelock/projects/create_golden_image_vm/images"
 CLOUDIMG_FILE="ubuntu-26.04-server-cloudimg-amd64.img"
 GOLDENIMG_FILE="ubuntu-26.04-server-goldenimg-amd64.img"
+FORGEJO_RAW_URL="https://forgejo.afobl.com/warelock/infraops/raw/branch/master/config/infrastructure.yaml"
+
+# --- Fetch nats CLI version from infrastructure.yaml ---
+NATS_CLI_VERSION=$(curl -sf "$FORGEJO_RAW_URL" | yq -p yaml '.platform.nats.cli_version' -)
+if [ -z "$NATS_CLI_VERSION" ]; then
+  echo "ERROR: Could not fetch nats CLI version from infrastructure.yaml" >&2
+  exit 1
+fi
+echo "NATS CLI version: $NATS_CLI_VERSION"
+
+# --- Download nats CLI binary ---
+NATS_URL="https://github.com/nats-io/natscli/releases/download/v${NATS_CLI_VERSION}/nats-${NATS_CLI_VERSION}-linux-amd64.zip"
+curl -sfL "$NATS_URL" -o /tmp/nats.zip
+unzip -oq /tmp/nats.zip -d /tmp
+mv "/tmp/nats-${NATS_CLI_VERSION}-linux-amd64/nats" /tmp/nats
+rm -rf /tmp/nats.zip "/tmp/nats-${NATS_CLI_VERSION}-linux-amd64"
 
 # --- Use the cloudimg as an unmodified template so we only modify the goldenimg file ---
 cp "$IMG_DIR/$CLOUDIMG_FILE" "$IMG_DIR/$GOLDENIMG_FILE"
+
+# --- Inject nats CLI into golden image (no boot required) ---
+virt-customize -a "$IMG_DIR/$GOLDENIMG_FILE" \
+  --mkdir /usr/local/bin \
+  --upload /tmp/nats /usr/local/bin/nats \
+  --chmod /usr/local/bin/nats:0755
+rm -f /tmp/nats
 
 # Create the pre-template VM
 sudo qm create "$TEMPLATE_VMID" \

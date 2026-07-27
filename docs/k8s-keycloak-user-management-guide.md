@@ -19,7 +19,7 @@ User runs kubectl
 
 ### What's already in place
 
-- **Keycloak** at `https://docker.localdomain:8443`, realm `infraops`
+- **Keycloak** at `https://keycloak.afobl.com`, realm `infraops`
 - **Client `kubernetes-cli`** — public client with Device Authorization Grant, configured with the necessary protocol mappers (audience + groups)
 - **API server** on each cluster configured with `--oidc-*` flags pointing to the Keycloak realm
 - **`kubelogin`** installed on admin workstations as `kubectl-oidc_login`
@@ -31,7 +31,7 @@ User runs kubectl
 
 ### 1. Create a new user
 
-In the Keycloak admin console (`https://docker.localdomain:8443/admin`):
+In the Keycloak admin console (`https://keycloak.afobl.com/admin`):
 
 1. Switch to the **`infraops`** realm (top-left dropdown)
 2. **Users** → **Add user**
@@ -219,4 +219,4 @@ The API server only validates against its own `--oidc-client-id`, so a token for
 | Remove user from group | Keycloak → Users → click user → Groups → Leave |
 | Map group to K8s role | Apply ClusterRoleBinding on the target cluster |
 | Force re-auth | `rm -rf ~/.kube/cache` then run `kubectl get nodes` |
-| Check token claims | `kubelogin get-token --grant-type=device-code --oidc-client-id=kubernetes-cli --oidc-issuer-url=https://docker.localdomain:8443/realms/infraops --certificate-authority=~/.kube/oidc-ca.pem` and decode the JWT |
+| Check token claims | `kubelogin get-token --grant-type=device-code --oidc-client-id=kubernetes-cli --oidc-issuer-url=https://keycloak.afobl.com/realms/infraops --certificate-authority=~/.kube/oidc-ca.pem` and decode the JWT |
