@@ -81,9 +81,9 @@ graph TD
 
     FIREWALL["pfSense<br/>192.168.0.1<br/>DNS / DHCP / Gateway / VPN"]
     VIP["k8s-mushroom-api.localdomain<br/>192.168.0.30"]
-    VAULT["Vault<br/>docker.localdomain:8200"]
-    MINIO["MinIO<br/>docker.localdomain:9000"]
-    KEYCLOAK["Keycloak<br/>docker.localdomain:8443"]
+    VAULT["Vault<br/>vault.afobl.com"]
+    MINIO["MinIO<br/>minio.afobl.com"]
+    KEYCLOAK["Keycloak<br/>keycloak.afobl.com"]
 
     FIREWALL -->|"DNS resolution"| CP01
     FIREWALL -->|"DNS resolution"| W01

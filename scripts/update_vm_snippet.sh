@@ -14,7 +14,7 @@ if [[ -z "${VAULT_TOKEN:-}" ]]; then
 fi
 
 # Vault config
-: "${VAULT_ADDR:=https://docker.localdomain:8200}"
+: "${VAULT_ADDR:=https://vault.afobl.com}"
 : "${VAULT_SKIP_VERIFY:=true}"
 export VAULT_ADDR VAULT_SKIP_VERIFY
 

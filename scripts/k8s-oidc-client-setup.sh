@@ -6,8 +6,8 @@ set -euo pipefail
 # Installs kubectl, kubelogin, kubectx if missing. Configures kubeconfig with OIDC context.
 
 # --- Defaults ---
-OIDC_SERVER_NAME="docker.localdomain"
-OIDC_SERVER_PORT="8443"
+OIDC_SERVER_NAME="keycloak.afobl.com"
+OIDC_SERVER_PORT="443"
 OIDC_REALM="infraops"
 OIDC_CA_FILE=""
 CLUSTER_SERVER=""
@@ -34,7 +34,7 @@ Required:
   --cluster=<name>              Kubernetes cluster name (e.g., mushroom, banana)
 
 Optional:
-  --oidc-server-name=<host>     Keycloak hostname          (default: docker.localdomain)
+  --oidc-server-name=<host>     Keycloak hostname          (default: keycloak.afobl.com)
   --oidc-server-port=<port>     Keycloak port              (default: 8443)
   --oidc-realm=<realm>          Keycloak realm             (default: infraops)
   --oidc-ca-file=<path>         OIDC CA cert path          (auto-detected if omitted)

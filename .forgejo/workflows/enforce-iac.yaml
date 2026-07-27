@@ -36,7 +36,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          VAULT_ADDR: https://docker.localdomain:8200
+          VAULT_ADDR: https://vault.afobl.com
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
@@ -47,7 +47,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          VAULT_ADDR: https://docker.localdomain:8200
+          VAULT_ADDR: https://vault.afobl.com
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
@@ -64,7 +64,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          VAULT_ADDR: https://docker.localdomain:8200
+          VAULT_ADDR: https://vault.afobl.com
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
@@ -125,7 +125,7 @@ jobs:
             set -e
 
             echo "=== Reading NATS password from Vault ==="
-            export VAULT_ADDR="https://docker.localdomain:8200"
+            export VAULT_ADDR="https://vault.afobl.com"
             export VAULT_SKIP_VERIFY="true"
             export VAULT_TOKEN="${{ secrets.VAULT_RO_TOKEN }}"
             NATS_IAC_PASSWORD=$(vault kv get -format=json secret/infraops/nats | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['data']['iac_orchestrator_password'])")
@@ -155,7 +155,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          VAULT_ADDR: https://docker.localdomain:8200
+          VAULT_ADDR: https://vault.afobl.com
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
@@ -168,7 +168,7 @@ jobs:
             set -e
 
             echo "=== Reading NATS password from Vault ==="
-            export VAULT_ADDR="https://docker.localdomain:8200"
+            export VAULT_ADDR="https://vault.afobl.com"
             export VAULT_SKIP_VERIFY="true"
             NATS_IAC_PASSWORD=$(vault kv get -format=json secret/infraops/nats | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['data']['iac_orchestrator_password'])")
 
@@ -287,7 +287,7 @@ jobs:
             sh -c '
             set -e
             echo "=== Reading Proxmox credentials from Vault ==="
-            export VAULT_ADDR="https://docker.localdomain:8200"
+            export VAULT_ADDR="https://vault.afobl.com"
             export VAULT_SKIP_VERIFY="true"
             export VAULT_TOKEN="${{ secrets.VAULT_RO_TOKEN }}"
 
@@ -323,7 +323,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          VAULT_ADDR: https://docker.localdomain:8200
+          VAULT_ADDR: https://vault.afobl.com
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 

@@ -19,7 +19,7 @@ variable "dns_domain" {
 variable "vault_address" {
   description = "Vault server address"
   type        = string
-  default     = "https://docker.localdomain:8200"
+  default     = "https://vault.afobl.com"
 }
 
 variable "template_id" {

@@ -3,7 +3,6 @@ package_update: true
 
 packages:
   - qemu-guest-agent
-  - nats-cli
 
 write_files:
   - path: /etc/systemd/system/helloworld.service
@@ -26,6 +25,8 @@ write_files:
     content: |
       #!/bin/bash
       set -euo pipefail
+
+      trap self_destruct EXIT
 
       CONTEXT="vm"
       SUBJECT="infraops.helloworld"
@@ -79,7 +80,7 @@ write_files:
         fi
 
         local current_ip
-        current_ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+        current_ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -1)
         if [ "$current_ip" != "$AUTH_IP" ]; then
           log "IP mismatch: have=$current_ip want=$AUTH_IP — cannot fix, will reboot"
           fail=1
@@ -211,10 +212,11 @@ runcmd:
   - >
     mkdir -p /etc/helloworld &&
     AUTH_HOSTNAME=$(hostname) &&
-    AUTH_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1) &&
+    AUTH_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -1) &&
     AUTH_VMID=$(cat /sys/class/dmi/id/product_serial) &&
     printf "hostname: %s\nip: %s\nvm_id: %s\n" "$AUTH_HOSTNAME" "$AUTH_IP" "$AUTH_VMID" > /etc/helloworld/hostinfo.txt
   - systemctl enable helloworld.service
+  - systemctl start helloworld.service
   - >
     ACTUAL_IF=$(ip route show default | awk '{print $5}' | head -1) &&
     sed -i "s/eth0/$ACTUAL_IF/g" /etc/netplan/50-cloud-init.yaml &&
