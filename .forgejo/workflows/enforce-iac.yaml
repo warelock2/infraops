@@ -133,8 +133,7 @@ jobs:
             echo "=== Setting up nats context ==="
             nats context add iac-orchestrator \
               --server tls://midas.afobl.com:4222 \
-              --user iac-orchestrator --password "$NATS_IAC_PASSWORD" \
-              --tlsca certs/afobl.com.ca
+              --user iac-orchestrator --password "$NATS_IAC_PASSWORD"
 
             echo "=== Ensuring readiness-poller consumer exists ==="
             nats consumer add infraops readiness-poller \
@@ -175,8 +174,7 @@ jobs:
             echo "=== Setting up nats context ==="
             nats context add iac-orchestrator \
               --server tls://midas.afobl.com:4222 \
-              --user iac-orchestrator --password "$NATS_IAC_PASSWORD" \
-              --tlsca certs/afobl.com.ca
+              --user iac-orchestrator --password "$NATS_IAC_PASSWORD"
 
             echo "=== Computing expected VMs ==="
             EXPECTED_VMS=""
