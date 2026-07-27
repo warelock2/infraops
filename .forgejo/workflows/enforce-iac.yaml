@@ -128,7 +128,7 @@ jobs:
             export VAULT_ADDR="https://vault.afobl.com"
             export VAULT_SKIP_VERIFY="true"
             export VAULT_TOKEN="${{ secrets.VAULT_RO_TOKEN }}"
-            NATS_IAC_PASSWORD=$(vault kv get -format=json secret/infraops/nats | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['data']['iac_orchestrator_password'])")
+            NATS_IAC_PASSWORD=$(vault kv get -format=json secret/infraops/nats | jq -r '.data.data.iac_orchestrator_password')
 
             echo "=== Setting up nats context ==="
             nats context add iac-orchestrator \
@@ -169,7 +169,7 @@ jobs:
             echo "=== Reading NATS password from Vault ==="
             export VAULT_ADDR="https://vault.afobl.com"
             export VAULT_SKIP_VERIFY="true"
-            NATS_IAC_PASSWORD=$(vault kv get -format=json secret/infraops/nats | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['data']['iac_orchestrator_password'])")
+            NATS_IAC_PASSWORD=$(vault kv get -format=json secret/infraops/nats | jq -r '.data.data.iac_orchestrator_password')
 
             echo "=== Setting up nats context ==="
             nats context add iac-orchestrator \
@@ -223,7 +223,7 @@ jobs:
 
               # Check for new messages
               while MSG=$(nats consumer next infraops readiness-poller --context=iac-orchestrator --wait=2s 2>/dev/null); do
-                HOSTNAME=$(echo "$MSG" | python3 -c "import sys,json; print(json.load(sys.stdin).get(\"hostname\",\"\"))" 2>/dev/null || true)
+                HOSTNAME=$(echo "$MSG" | jq -r '.hostname // empty' 2>/dev/null || true)
                 if [ -n "$HOSTNAME" ] && echo "$READY_VMS" | grep -q "$HOSTNAME"; then
                   continue
                 fi
@@ -289,8 +289,8 @@ jobs:
             export VAULT_SKIP_VERIFY="true"
             export VAULT_TOKEN="${{ secrets.VAULT_RO_TOKEN }}"
 
-            PROXMOX_ENDPOINT=$(vault kv get -format=json secret/infraops/proxmox | python3 -c "import sys,json; print(json.load(sys.stdin)[\"data\"][\"data\"][\"endpoint\"])")
-            PROXMOX_TOKEN=$(vault kv get -format=json secret/infraops/proxmox | python3 -c "import sys,json; print(json.load(sys.stdin)[\"data\"][\"data\"][\"api_token\"])")
+            PROXMOX_ENDPOINT=$(vault kv get -format=json secret/infraops/proxmox | jq -r '.data.data.endpoint')
+            PROXMOX_TOKEN=$(vault kv get -format=json secret/infraops/proxmox | jq -r '.data.data.api_token')
             PROXMOX_NODE=$(yq .platform.proxmox.node config/infrastructure.yaml)
 
             echo "Endpoint: $PROXMOX_ENDPOINT"
