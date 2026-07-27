@@ -8,14 +8,17 @@ write_files:
   - path: /etc/systemd/system/helloworld.service
     content: |
       [Unit]
-      Description=VM Readiness Signal
+      Description=VM Readiness Heartbeat
       After=cloud-init.service network-online.target sshd.service
       Wants=network-online.target
 
       [Service]
-      Type=oneshot
+      Type=simple
       ExecStart=/usr/local/bin/helloworld.sh
-      RemainAfterExit=no
+      Restart=on-failure
+      RestartSec=30
+      StartLimitBurst=3
+      StartLimitIntervalSec=300
 
       [Install]
       WantedBy=multi-user.target
@@ -26,14 +29,15 @@ write_files:
       #!/bin/bash
       set -euo pipefail
 
-      trap self_destruct EXIT
-
       CONTEXT="vm"
       SUBJECT="infraops.helloworld"
+      ACK_PREFIX="infraops.helloworld.ack"
       HOSTINFO="/etc/helloworld/hostinfo.txt"
       MAX_ATTEMPTS=3
       MAX_REBOOTS=2
       REBOOT_COUNT_FILE="/var/run/helloworld_reboot_count"
+      PUBLISH_INTERVAL=300
+      ACK_TIMEOUT=300
 
       log() {
         echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) helloworld: $*" >&2
@@ -115,11 +119,36 @@ write_files:
         return $fail
       }
 
-      publish_birth() {
+      publish_readiness() {
         TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
         PAYLOAD="{\"hostname\":\"$AUTH_HOSTNAME\",\"ip\":\"$AUTH_IP\",\"vmid\":\"$AUTH_VMID\",\"timestamp\":\"$TIMESTAMP\"}"
-        log "publishing birth: $PAYLOAD"
+        log "publishing readiness: $PAYLOAD"
         nats pub "$SUBJECT" "$PAYLOAD" --context="$CONTEXT" -J
+      }
+
+      wait_for_ack() {
+        local ack_file="/tmp/helloworld_ack_$$"
+        rm -f "$ack_file"
+
+        log "subscribing to $ACK_PREFIX.$AUTH_HOSTNAME for ack"
+        nats sub "$ACK_PREFIX.$AUTH_HOSTNAME" --context="$CONTEXT" --count=1 --timeout="$ACK_TIMEOUT" > "$ack_file" 2>/dev/null &
+        local sub_pid=$!
+
+        sleep 2
+
+        publish_readiness
+
+        wait "$sub_pid" 2>/dev/null || true
+
+        if [ -s "$ack_file" ]; then
+          log "ack received"
+          rm -f "$ack_file"
+          return 0
+        fi
+
+        rm -f "$ack_file"
+        log "no ack received within ${ACK_TIMEOUT}s"
+        return 1
       }
 
       self_destruct() {
@@ -153,18 +182,20 @@ write_files:
       for attempt in $(seq 1 $MAX_ATTEMPTS); do
         log "validation attempt $attempt/$MAX_ATTEMPTS"
         if validate_and_heal; then
-          if publish_birth; then
-            log "birth published successfully"
-            self_destruct
-            exit 0
-          else
-            log "publish failed"
-          fi
+          log "validation passed"
+          break
         fi
         sleep 2
       done
 
-      maybe_reboot
+      while true; do
+        if wait_for_ack; then
+          self_destruct
+          exit 0
+        fi
+        log "retrying in ${PUBLISH_INTERVAL}s"
+        sleep "$PUBLISH_INTERVAL"
+      done
     permissions: "0755"
 
   - path: /root/.config/nats/context/vm.json

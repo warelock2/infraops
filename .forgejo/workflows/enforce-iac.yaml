@@ -228,6 +228,7 @@ jobs:
                 if [ -n "$HOSTNAME" ]; then
                   echo "READY: $HOSTNAME"
                   READY_VMS="$READY_VMS $HOSTNAME"
+                  nats pub "infraops.helloworld.ack.$HOSTNAME" '{"ack":true}' --context=iac-orchestrator
                 fi
               done || true
 
