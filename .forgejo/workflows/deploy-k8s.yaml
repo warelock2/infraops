@@ -14,7 +14,10 @@ jobs:
         uses: docker://python:3.12-alpine
         with:
           args: >
-            sh -c "apk add -q yq &&
+            sh -c "apk add -q wget &&
+            wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&
+            chmod 755 /usr/local/bin/yq &&
+            yq -V | grep -q mikefarah &&
             pip install -q --root-user-action=ignore check-jsonschema &&
             check-jsonschema --schemafile config/infrastructure.schema.yaml
             config/infrastructure.yaml"
@@ -23,7 +26,10 @@ jobs:
         uses: docker://alpine/ansible:latest
         with:
           args: >
-            sh -c "apk add --no-cache -q curl unzip yq &&
+            sh -c "apk add --no-cache -q curl unzip wget &&
+            wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&
+            chmod 755 /usr/local/bin/yq &&
+            yq -V | grep -q mikefarah &&
             TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
             curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
             unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
@@ -38,7 +44,10 @@ jobs:
         uses: docker://alpine/ansible:latest
         with:
           args: >
-            sh -c 'apk add -q yq py3-pip &&
+            sh -c 'apk add -q wget py3-pip &&
+            wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&
+            chmod 755 /usr/local/bin/yq &&
+            yq -V | grep -q mikefarah &&
             pip3 install -q --break-system-packages --root-user-action=ignore hvac &&
             ansible-galaxy collection install
             kubernetes.core community.general ansible.posix

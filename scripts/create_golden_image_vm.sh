@@ -33,7 +33,7 @@ cp "$IMG_DIR/$CLOUDIMG_FILE" "$IMG_DIR/$GOLDENIMG_FILE"
 # --- Inject nats CLI into golden image (no boot required) ---
 virt-customize -a "$IMG_DIR/$GOLDENIMG_FILE" \
   --mkdir /usr/local/bin \
-  --upload /tmp/nats /usr/local/bin/nats \
+  --upload /tmp/nats:/usr/local/bin/nats \
   --chmod /usr/local/bin/nats:0755
 rm -f /tmp/nats
 

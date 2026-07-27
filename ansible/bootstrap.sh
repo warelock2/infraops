@@ -6,7 +6,10 @@ export PYTHONWARNINGS="ignore:Unverified HTTPS request is being made"
 echo "=== Ansible version ==="
 ansible --version
 
-apk add --no-cache py3-requests py3-yaml yq curl unzip
+apk add --no-cache py3-requests py3-yaml curl unzip wget
+wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+chmod 755 /usr/local/bin/yq
+yq -V | grep -q mikefarah || { echo "ERROR: wrong yq"; exit 1; }
 ansible-galaxy collection install -r ansible/requirements.yaml
 
 # Extract values from config/infrastructure.yaml
