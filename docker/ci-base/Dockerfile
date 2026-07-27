@@ -4,7 +4,7 @@ ARG TF_VERSION=1.7.5
 ARG VAULT_VERSION=1.17.3
 ARG NATS_CLI_VERSION
 
-RUN apk add --no-cache curl unzip py3-pip py3-requests py3-yaml yq && \
+RUN apk add --no-cache curl unzip jq py3-pip py3-requests py3-yaml yq && \
     curl -sL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" \
       -o /tmp/terraform.zip && \
     unzip -oq /tmp/terraform.zip -d /usr/local/bin/ && \
