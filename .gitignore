@@ -45,3 +45,4 @@ id_rsa*
 
 setpw.sh
 certs/
+session.json

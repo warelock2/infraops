@@ -16,13 +16,6 @@ jobs:
         with:
           ref: master
 
-      - name: Pull CI base image (force fresh)
-        uses: docker://docker:latest
-        with:
-          args: pull forgejo.afobl.com/warelock/ci-base:latest
-        env:
-          DOCKER_HOST: tcp://docker-in-docker:2375
-
       - name: Validate Infrastructure YAML
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
