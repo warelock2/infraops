@@ -16,6 +16,11 @@ jobs:
         with:
           ref: master
 
+      - name: Pull CI base image (force fresh)
+        uses: docker://docker:latest
+        with:
+          args: pull forgejo.afobl.com/warelock/ci-base:latest
+
       - name: Validate Infrastructure YAML
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
