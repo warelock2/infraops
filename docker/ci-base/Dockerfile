@@ -1,7 +1,5 @@
 FROM docker.io/alpine/ansible:latest
 
-ENTRYPOINT ["/bin/sh", "-c"]
-
 ARG TF_VERSION=1.7.5
 ARG VAULT_VERSION=1.17.3
 ARG NATS_CLI_VERSION
