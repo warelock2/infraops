@@ -121,13 +121,14 @@ jobs:
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: |
-            set -e
+            set -ex
 
             echo "=== Reading NATS password from Vault ==="
             export VAULT_ADDR="https://vault.afobl.com"
             export VAULT_SKIP_VERIFY="true"
             export VAULT_TOKEN="${{ secrets.VAULT_RO_TOKEN }}"
             NATS_IAC_PASSWORD=$(vault kv get -format=json secret/infraops/nats | jq -r '.data.data.iac_orchestrator_password')
+            echo "NATS_IAC_PASSWORD length: ${#NATS_IAC_PASSWORD}"
 
             echo "=== Setting up nats context ==="
             nats context add iac-orchestrator \
@@ -139,7 +140,12 @@ jobs:
               --pull --ack=explicit --deliver=all \
               --filter="infraops.helloworld" \
               --replay=instant --max-deliver=-1 --max-pending=-1 \
-              --defaults --context=iac-orchestrator
+              --defaults --context=iac-orchestrator || true
+
+            echo "=== Consumer info ==="
+            nats consumer info infraops readiness-poller --context=iac-orchestrator || true
+            echo "=== Stream info ==="
+            nats stream info infraops --context=iac-orchestrator || true
 
       - name: Terraform Apply
         if: github.ref == 'refs/heads/master'
@@ -205,9 +211,14 @@ jobs:
             echo "Total VMs: $TOTAL"
 
             echo "=== Polling for readiness signals (20 min timeout) ==="
+            echo "Expected VMs: $EXPECTED_VMS"
+            echo "Total expected: $TOTAL"
             READY_VMS=""
             START_TIME=$(date +%s)
             TIMEOUT=1200
+
+            echo "=== Consumer info before polling ==="
+            nats consumer info infraops readiness-poller --context=iac-orchestrator 2>&1 || true
 
             while true; do
               ELAPSED=$(( $(date +%s) - START_TIME ))
@@ -221,7 +232,9 @@ jobs:
 
               # Check for new messages
               while MSG=$(nats consumer next infraops readiness-poller --context=iac-orchestrator --wait=2s 2>/dev/null); do
+                echo "RAW MSG: $MSG"
                 HOSTNAME=$(echo "$MSG" | jq -r '.hostname // empty' 2>/dev/null || true)
+                echo "PARSED HOSTNAME: '$HOSTNAME'"
                 if [ -n "$HOSTNAME" ] && echo "$READY_VMS" | grep -q "$HOSTNAME"; then
                   continue
                 fi
