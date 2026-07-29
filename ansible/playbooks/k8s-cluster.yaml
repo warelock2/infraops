@@ -97,15 +97,6 @@
     - name: Apply sysctl settings
       ansible.builtin.command: sysctl --system
       when: _sysctl_config.changed
-      async: 30
-      poll: 5
-      ignore_unreachable: true
-
-    - name: Recover connection after sysctl
-      ansible.builtin.wait_for_connection:
-        delay: 2
-        timeout: 30
-      when: _sysctl_config.changed
 
     - name: Install containerd
       ansible.builtin.apt:
