@@ -60,7 +60,7 @@ while true; do
   REMAINING=$((TIMEOUT - ELAPSED))
   echo "--- Poll cycle (${ELAPSED}s elapsed, ${REMAINING}s remaining) ---"
 
-  while MSG=$(nats consumer next infraops readiness-poller --context=iac-orchestrator --wait=2s 2>/dev/null); do
+  while MSG=$(nats consumer next infraops readiness-poller --context=iac-orchestrator --raw --wait=2s 2>/dev/null); do
     echo "RAW MSG: $MSG"
     HOSTNAME=$(echo "$MSG" | jq -r '.hostname // empty' 2>/dev/null || true)
     echo "PARSED HOSTNAME: '$HOSTNAME'"
