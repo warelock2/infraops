@@ -21,6 +21,12 @@ path "secret/data/infraops/proxmox" {
 path "secret/metadata/infraops/proxmox" {
   capabilities = ["read"]
 }
+path "secret/data/infraops/nats" {
+  capabilities = ["read"]
+}
+path "secret/metadata/infraops/nats" {
+  capabilities = ["read"]
+}
 EOF
 
 echo "Policy '$POLICY_NAME' written."
