@@ -4,6 +4,9 @@ set -e
 export VAULT_ADDR="${VAULT_ADDR:-https://vault.afobl.com}"
 export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-true}"
 
+# Accept timeout as first argument, default 1200s (20 min)
+READINESS_TIMEOUT="${1:-1200}"
+
 echo "=== Reading NATS password from Vault ==="
 NATS_IAC_PASSWORD=$(vault kv get -format=json secret/infraops/nats | jq -r '.data.data.iac_orchestrator_password')
 
@@ -42,10 +45,10 @@ echo "Expected VMs: $EXPECTED_VMS"
 TOTAL=$(echo "$EXPECTED_VMS" | wc -w)
 echo "Total VMs: $TOTAL"
 
-echo "=== Polling for readiness signals (20 min timeout) ==="
+echo "=== Polling for readiness signals (${READINESS_TIMEOUT}s timeout) ==="
 READY_VMS=""
 START_TIME=$(date +%s)
-TIMEOUT=1200
+TIMEOUT=$READINESS_TIMEOUT
 
 echo "=== Consumer info before polling ==="
 nats consumer info infraops readiness-poller --context=iac-orchestrator 2>&1 || true
