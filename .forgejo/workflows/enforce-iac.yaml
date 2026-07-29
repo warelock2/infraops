@@ -132,54 +132,28 @@ jobs:
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
-      - name: Terraform Apply
+      - name: Apply and Wait for Readiness (with retries)
+        id: apply-wait
         if: github.ref == 'refs/heads/master'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: >
-            sh -c "cd terraform &&
-            terraform init -reconfigure &&
-            terraform apply -auto-approve -no-color -input=false -parallelism=1"
+          args: sh scripts/terraform-apply-with-readiness.sh
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
           VAULT_ADDR: https://vault.afobl.com
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
-
-      - name: Wait for VM Readiness Signals
-        id: wait-for-signals
-        if: github.ref == 'refs/heads/master'
-        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
-        with:
-          args: sh scripts/wait-for-readiness.sh
-        env:
-          VAULT_ADDR: https://vault.afobl.com
-          VAULT_SKIP_VERIFY: "true"
-          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
-
-      - name: Destroy Failed VMs
-        if: github.ref == 'refs/heads/master' && failure() && steps.wait-for-signals.outputs.ready == 'false'
-        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
-        with:
-          args: sh scripts/destroy-failed-vms.sh
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
-          VAULT_ADDR: https://vault.afobl.com
-          VAULT_SKIP_VERIFY: "true"
-          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
-          FAILED_VMS: ${{ steps.wait-for-signals.outputs.failed_vms }}
 
       - name: Generate Ansible Inventory
-        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true'
+        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true' && steps.apply-wait.outputs.ready == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
             sh -c "python3 scripts/generate-inventory.py --output ansible/inventory.json"
 
       - name: Configuration Management
-        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true'
+        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true' && steps.apply-wait.outputs.ready == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
