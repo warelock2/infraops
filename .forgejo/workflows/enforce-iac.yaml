@@ -17,10 +17,10 @@ jobs:
           GIT_SSL_NO_VERIFY: "1"
         with:
           args: >
-            sh -c "rm -rf /workspace/warelock/infraops &&
-            git clone --depth 1 --branch master
+            sh -c "git clone --depth 1 --branch master
             https://docker.localdomain:3000/warelock/infraops.git
-            /workspace/warelock/infraops"
+            /tmp/repo && cp -r /tmp/repo/.
+            /workspace/warelock/infraops/"
 
       - name: Validate Infrastructure YAML
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
