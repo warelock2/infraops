@@ -4,7 +4,7 @@ ARG TF_VERSION=1.7.5
 ARG VAULT_VERSION=1.17.3
 ARG NATS_CLI_VERSION
 
-RUN apk add --no-cache curl unzip jq py3-pip py3-requests py3-yaml wget && \
+RUN apk add --no-cache curl unzip jq py3-pip py3-requests py3-yaml wget git && \
     wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq && \
     chmod 755 /usr/local/bin/yq && \
     yq -V | grep -q mikefarah || { echo "ERROR: wrong yq"; exit 1; } && \
