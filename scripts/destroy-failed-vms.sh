@@ -4,31 +4,43 @@ set -e
 export VAULT_ADDR="${VAULT_ADDR:-https://vault.afobl.com}"
 export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-true}"
 
-echo "=== Reading Proxmox credentials from Vault ==="
-PROXMOX_ENDPOINT=$(vault kv get -format=json secret/infraops/proxmox | jq -r '.data.data.endpoint')
-PROXMOX_TOKEN=$(vault kv get -format=json secret/infraops/proxmox | jq -r '.data.data.api_token')
-PROXMOX_NODE=$(yq .platform.proxmox.node config/infrastructure.yaml)
+if [ -z "${FAILED_VMS:-}" ]; then
+  echo "FAILED_VMS not set, reading from wait-for-readiness output..."
+  FAILED_VMS=$(cat /tmp/failed_vms.txt 2>/dev/null || grep '^failed_vms=' /tmp/wait-output.txt 2>/dev/null | cut -d= -f2- || echo "")
+fi
 
-echo "Endpoint: $PROXMOX_ENDPOINT"
-echo "Node: $PROXMOX_NODE"
+if [ -z "$FAILED_VMS" ]; then
+  echo "No failed VMs to destroy"
+  exit 0
+fi
+
+PROXMOX_NODE=$(yq ".platform.proxmox.node_name" config/infrastructure.yaml)
+PROXMOX_TOKEN=$(vault kv get -field=api_token secret/infraops/proxmox)
+
+echo "Destroying failed VMs: $FAILED_VMS"
 
 for entry in $FAILED_VMS; do
   HOSTNAME="${entry%%:*}"
   VMID="${entry##*:}"
-  echo "Destroying $HOSTNAME (VMID $VMID)..."
-  HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" \
-    -X DELETE \
-    -H "Authorization: PVEAPIToken=${PROXMOX_TOKEN}" \
-    "${PROXMOX_ENDPOINT}/nodes/${PROXMOX_NODE}/qemu/${VMID}")
-  echo "  HTTP $HTTP_CODE"
-  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ]; then
-    echo "  $HOSTNAME destroyed"
-  else
-    echo "  WARNING: unexpected HTTP $HTTP_CODE"
-  fi
-done
+  echo "Destroying failed VM: $HOSTNAME (VMID $VMID)"
 
-echo "=== Re-applying Terraform to recreate destroyed VMs ==="
-cd terraform
-terraform init -reconfigure
-terraform apply -auto-approve -no-color -input=false -parallelism=1
+  # Stop VM first (required before destroy)
+  echo "Stopping VM $HOSTNAME (VMID $VMID)..."
+  curl -k -s -X POST \
+    -H "Authorization: Bearer $PROXMOX_TOKEN" \
+    "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VMID}/status/stop" \
+    && echo "  -> Stopped" \
+    || echo "  -> Stop failed (may already be stopped)"
+
+  # Wait for stop to complete
+  sleep 5
+
+  terraform -chdir=terraform state rm "proxmox_virtual_environment_vm.vm[\"$HOSTNAME\"]" 2>/dev/null || true
+
+  echo "Deleting VM $HOSTNAME (VMID $VMID) via Proxmox API..."
+  curl -k -s -X DELETE \
+    -H "Authorization: Bearer $PROXMOX_TOKEN" \
+    "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VMID}" \
+    && echo "  -> Destroyed" \
+    || echo "  -> Failed (may already be gone)"
+done
