@@ -21,8 +21,8 @@ export VAULT_ADDR VAULT_SKIP_VERIFY
 # Get vm_password from Vault
 NATS_VM_PASSWORD=$(vault kv get -field=vm_password secret/infraops/nats)
 
-# Fill template and deploy with sudo
-sed "s|__NATS_VM_PASSWORD__|${NATS_VM_PASSWORD}|g" cloud-init-reboot.yaml.template \
-  | sudo tee /var/lib/vz/snippets/cloud-init-reboot.yaml >/dev/null
+# Fetch cloud-init template from git and deploy filled snippet
+RAW_URL="https://forgejo.afobl.com/warelock/infraops/raw/branch/master/cloud-init-reboot.yaml.template"
+curl -sfL "$RAW_URL" | sed "s|__NATS_VM_PASSWORD__|${NATS_VM_PASSWORD__}|g" | sudo tee /var/lib/vz/snippets/cloud-init-reboot.yaml >/dev/null
 
 echo "Deployed filled snippet to /var/lib/vz/snippets/cloud-init-reboot.yaml"
