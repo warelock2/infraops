@@ -1,11 +1,12 @@
-FROM docker.io/alpine/ansible:latest
+FROM docker.io/alpine:latest
 
 ARG TF_VERSION=1.7.5
 ARG VAULT_VERSION=1.17.3
 ARG NATS_CLI_VERSION
 ARG KUBECTL_VERSION=1.33.0
 
-RUN apk add --no-cache curl unzip jq py3-pip py3-requests py3-yaml wget git && \
+RUN apk add --no-cache curl unzip jq python3 py3-pip py3-requests py3-yaml wget git && \
+    # --- binaries ---
     wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq && \
     chmod 755 /usr/local/bin/yq && \
     yq -V | grep -q mikefarah || { echo "ERROR: wrong yq"; exit 1; } && \
@@ -25,7 +26,17 @@ RUN apk add --no-cache curl unzip jq py3-pip py3-requests py3-yaml wget git && \
     curl -sL "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
       -o /usr/local/bin/kubectl && \
     chmod 755 /usr/local/bin/kubectl && \
-    pip3 install --no-cache-dir --break-system-packages hvac pfsense-vshell check-jsonschema && \
+    # --- ansible-core (core only, no bundled collections) ---
+    pip3 install --break-system-packages --no-cache-dir ansible-core && \
+    # --- pip packages (no-deps: deps already satisfied by apk or ansible-core) ---
+    pip3 install --break-system-packages --no-cache-dir --no-deps \
+      hvac pfsense-vshell check-jsonschema && \
+    # --- ansible-galaxy collections (only what we use) ---
     ansible-galaxy collection install -p /usr/share/ansible/collections \
       kubernetes.core community.general ansible.posix \
-      community.hashi_vault pfrest.pfsense
+      community.hashi_vault pfrest.pfsense && \
+    # --- cleanup ---
+    rm -rf /usr/lib/python3.*/site-packages/ansible_test \
+           /usr/lib/python3.*/site-packages/pip \
+           /usr/lib/python3.*/site-packages/__pycache__ \
+           /root/.cache /tmp/*
