@@ -30,7 +30,9 @@ RUN apk add --no-cache curl unzip jq python3 py3-pip py3-requests py3-yaml wget 
     pip3 install --break-system-packages --no-cache-dir ansible-core && \
     # --- pip packages (no-deps: deps already satisfied by apk or ansible-core) ---
     pip3 install --break-system-packages --no-cache-dir --no-deps \
-      hvac pfsense-vshell check-jsonschema && \
+      hvac pfsense-vshell && \
+    # check-jsonschema pulls its own deps (click, jsonschema, referencing)
+    pip3 install --break-system-packages --no-cache-dir check-jsonschema && \
     # --- ansible-galaxy collections (only what we use) ---
     ansible-galaxy collection install -p /usr/share/ansible/collections \
       kubernetes.core community.general ansible.posix \
