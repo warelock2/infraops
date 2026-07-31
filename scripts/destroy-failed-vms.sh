@@ -26,11 +26,12 @@ for entry in $FAILED_VMS; do
 
   # Stop VM first (required before destroy)
   echo "Stopping VM $HOSTNAME (VMID $VMID)..."
-  curl -k -s -X POST \
+  curl -k -sS -f -X POST \
     -H "Authorization: Bearer $PROXMOX_TOKEN" \
+    -w "\n  -> HTTP %{http_code}\n" \
     "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VMID}/status/stop" \
     && echo "  -> Stopped" \
-    || echo "  -> Stop failed (may already be stopped)"
+    || echo "  -> Stop failed"
 
   # Wait for stop to complete
   sleep 5
@@ -38,9 +39,10 @@ for entry in $FAILED_VMS; do
   terraform -chdir=terraform state rm "proxmox_virtual_environment_vm.vm[\"$HOSTNAME\"]" 2>/dev/null || true
 
   echo "Deleting VM $HOSTNAME (VMID $VMID) via Proxmox API..."
-  curl -k -s -X DELETE \
+  curl -k -sS -f -X DELETE \
     -H "Authorization: Bearer $PROXMOX_TOKEN" \
+    -w "\n  -> HTTP %{http_code}\n" \
     "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VMID}" \
     && echo "  -> Destroyed" \
-    || echo "  -> Failed (may already be gone)"
+    || echo "  -> Delete failed"
 done
