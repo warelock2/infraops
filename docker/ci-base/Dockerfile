@@ -3,6 +3,7 @@ FROM docker.io/alpine/ansible:latest
 ARG TF_VERSION=1.7.5
 ARG VAULT_VERSION=1.17.3
 ARG NATS_CLI_VERSION
+ARG KUBECTL_VERSION=1.33.0
 
 RUN apk add --no-cache curl unzip jq py3-pip py3-requests py3-yaml wget git && \
     wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq && \
@@ -21,6 +22,9 @@ RUN apk add --no-cache curl unzip jq py3-pip py3-requests py3-yaml wget git && \
     unzip -oq /tmp/nats.zip -d /tmp && \
     mv /tmp/nats-${NATS_CLI_VERSION}-linux-amd64/nats /usr/local/bin/nats && \
     rm -rf /tmp/nats* && \
+    curl -sL "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+      -o /usr/local/bin/kubectl && \
+    chmod 755 /usr/local/bin/kubectl && \
     pip3 install --no-cache-dir --break-system-packages hvac pfsense-vshell check-jsonschema && \
     ansible-galaxy collection install -p /usr/share/ansible/collections \
       kubernetes.core community.general ansible.posix \

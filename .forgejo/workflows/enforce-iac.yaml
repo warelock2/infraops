@@ -105,10 +105,6 @@ jobs:
         with:
           args: >
             sh -c "
-            K8S_VERSION=$(yq .platform.kubernetes.version config/infrastructure.yaml) &&
-            curl -sLO https://dl.k8s.io/release/v${K8S_VERSION}/bin/linux/amd64/kubectl &&
-            chmod +x kubectl &&
-            mv kubectl /usr/local/bin/ &&
             mkdir -p ~/.kube &&
             echo \"\$K8S_ADMIN_KUBECONFIG\" > ~/.kube/config &&
             chmod 600 ~/.kube/config &&
