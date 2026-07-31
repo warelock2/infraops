@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# pre-push: block direct pushes to the public mirrors (github, dmz).
+# Mirrors are updated with ~/bin/push_public, which pushes a sanitized copy
+# of the branch with config/infrastructure.yaml stripped from all history.
+# origin (private) is untouched and pushes normally.
+set -u
+
+REMOTE="${1:-}"
+
+case "$REMOTE" in
+  github|dmz)
+    echo "pre-push: direct pushes to '$REMOTE' are blocked; use ~/bin/push_public (strips config/infrastructure.yaml)" >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac

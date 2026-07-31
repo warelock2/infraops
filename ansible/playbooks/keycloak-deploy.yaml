@@ -47,7 +47,7 @@
     kc_container_port: 8443
     kc_domain: "{{ infra_service_domain }}"
     kc_container_name: "{{ kc_project_name }}"
-    kc_container_image: "{{ infra_platform_keycloak_container_image | default('quay.io/keycloak/keycloak:latest') }}"
+    kc_container_image: "{{ infra_platform_keycloak_container_image | default('forgejo.afobl.com/warelock/keycloak:latest') }}"
     kc_bootstrap_admin_user: admin
     kc_bootstrap_admin_password: "{{ lookup('env', 'KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD') | default('', true) }}"
     provision_mode: false

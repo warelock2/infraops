@@ -8,7 +8,7 @@ platform:
     realm: infraops
     auth_realm: master
     admin_user: admin
-    container_image: "quay.io/keycloak/keycloak:latest"
+    container_image: "forgejo.afobl.com/warelock/keycloak:latest"
   kubernetes:
     version: "1.33.0"
     pod_network_cidr: "10.244.0.0/16"
