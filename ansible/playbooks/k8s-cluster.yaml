@@ -109,7 +109,8 @@
         cmd: >
           mkdir -p /etc/containerd &&
           containerd config default > /etc/containerd/config.toml &&
-          sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+          sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml &&
+          sed -i 's|sandbox_image = .*|sandbox_image = "{{ k8s_image_repository }}/pause:3.10"|' /etc/containerd/config.toml
       args:
         creates: /etc/containerd/config.toml
 
@@ -448,6 +449,13 @@
         mode: "0644"
       when: inventory_hostname == cp_leader
 
+    - name: Rewrite Calico images to local registry
+      ansible.builtin.replace:
+        path: /tmp/calico.yaml
+        regexp: 'image: docker.io/calico/([a-z-]+)'
+        replace: 'image: {{ k8s_image_repository }}/calico-\1'
+      when: inventory_hostname == cp_leader
+
     - name: Enable WireGuard in Calico manifest
       ansible.builtin.shell:
         cmd: >
@@ -532,7 +540,7 @@
       ansible.builtin.shell:
         cmd: >
           kubectl wait --for=condition=Ready nodes --all
-          --timeout=300s
+          --timeout=900s
           --kubeconfig /etc/kubernetes/admin.conf
       changed_when: false
 

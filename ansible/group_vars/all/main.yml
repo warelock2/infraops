@@ -5,6 +5,7 @@ ansible_python_interpreter: /usr/bin/python3
 k8s_version: "{{ infra_platform_kubernetes_version }}"
 pod_network_cidr: "{{ infra_platform_kubernetes_pod_network_cidr }}"
 calico_version: "{{ infra_platform_kubernetes_calico_version }}"
+k8s_image_repository: "{{ infra_platform_kubernetes_image_repository | default('forgejo.afobl.com/warelock') }}"
 domain: "{{ infra_service_domain }}"
 admin_user: "{{ infra_admin_user }}"
 admin_group: "{{ infra_admin_group }}"
