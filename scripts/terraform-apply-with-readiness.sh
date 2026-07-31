@@ -67,7 +67,7 @@ for RETRY in $(seq 1 $MAX_RETRIES); do
     terraform -chdir=terraform state rm "proxmox_virtual_environment_vm.vm[\"$HOSTNAME\"]" 2>/dev/null || true
     
     echo "Deleting VM $HOSTNAME via Proxmox API..."
-    PROXMOX_NODE=$(yq ".platform.proxmox.node_name" config/infrastructure.yaml)
+    PROXMOX_NODE=$(yq ".platform.proxmox.node" config/infrastructure.yaml)
     curl -k -s -X DELETE \
       -H "Authorization: Bearer $(vault kv get -field=api_token secret/infraops/proxmox)" \
       "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VMID}" \
