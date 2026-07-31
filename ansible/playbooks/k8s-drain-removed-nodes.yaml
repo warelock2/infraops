@@ -10,7 +10,7 @@
           python3 << 'PYEOF'
           import yaml
 
-          with open('{{ playbook_dir }}/../../config/infrastructure.yaml') as f:
+          with open('{{ playbook_dir }}/../../conf/infrastructure.yaml') as f:
               infra = yaml.safe_load(f)
 
           nodes = []

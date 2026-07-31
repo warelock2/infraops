@@ -5,7 +5,7 @@
   tasks:
     - name: Read infrastructure.yaml
       ansible.builtin.slurp:
-        src: "{{ playbook_dir }}/../../config/infrastructure.yaml"
+        src: "{{ playbook_dir }}/../../conf/infrastructure.yaml"
       register: infra_raw
 
     - name: Parse infrastructure.yaml

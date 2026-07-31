@@ -14,7 +14,7 @@ if [ -z "$FAILED_VMS" ]; then
   exit 0
 fi
 
-PROXMOX_NODE=$(yq ".platform.proxmox.node" config/infrastructure.yaml)
+PROXMOX_NODE=$(yq ".platform.proxmox.node" conf/infrastructure.yaml)
 PROXMOX_TOKEN=$(vault kv get -field=api_token secret/infraops/proxmox)
 
 echo "Destroying failed VMs: $FAILED_VMS"

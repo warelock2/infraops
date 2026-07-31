@@ -175,7 +175,7 @@ def generate_markdown(schema):
 
 
 def main():
-    schema_path = "config/infrastructure.schema.yaml"
+    schema_path = "conf/infrastructure.schema.yaml"
     output_path = "docs/SCHEMA_REFERENCE.md"
 
     with open(schema_path) as f:

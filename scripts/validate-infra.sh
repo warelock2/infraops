@@ -4,8 +4,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-SCHEMA="$PROJECT_DIR/config/infrastructure.schema.yaml"
-INFRA="$PROJECT_DIR/config/infrastructure.yaml"
+SCHEMA="$PROJECT_DIR/conf/infrastructure.schema.yaml"
+INFRA="$PROJECT_DIR/conf/infrastructure.yaml"
 
 if [ ! -f "$SCHEMA" ]; then
   echo "ERROR: Schema not found: $SCHEMA"

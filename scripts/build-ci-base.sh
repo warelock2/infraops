@@ -3,7 +3,7 @@ set -euo pipefail
 
 IMAGE="forgejo.afobl.com/warelock/ci-base:latest"
 DOCKERFILE="docker/ci-base/Dockerfile"
-FORGEJO_RAW_URL="https://forgejo.afobl.com/warelock/infraops/raw/branch/master/config/infrastructure.yaml"
+FORGEJO_RAW_URL="https://forgejo.afobl.com/warelock/infraops/raw/branch/master/conf/infrastructure.yaml"
 
 cd "$(dirname "$0")/.."
 

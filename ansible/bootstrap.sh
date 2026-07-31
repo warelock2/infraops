@@ -12,13 +12,13 @@ chmod 755 /usr/local/bin/yq
 yq -V | grep -q mikefarah || { echo "ERROR: wrong yq"; exit 1; }
 ansible-galaxy collection install -r ansible/requirements.yaml
 
-# Extract values from config/infrastructure.yaml
-TF_VERSION=$(yq '.platform.terraform.version' config/infrastructure.yaml)
-SERVICE_HOST=$(yq '.defaults.service_host' config/infrastructure.yaml)
-DNS_DOMAIN=$(yq '.platform.proxmox.dns_domain' config/infrastructure.yaml)
+# Extract values from conf/infrastructure.yaml
+TF_VERSION=$(yq '.platform.terraform.version' conf/infrastructure.yaml)
+SERVICE_HOST=$(yq '.defaults.service_host' conf/infrastructure.yaml)
+DNS_DOMAIN=$(yq '.platform.proxmox.dns_domain' conf/infrastructure.yaml)
 SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}"
-ADMIN_USER=$(yq '.platform.admin.user' config/infrastructure.yaml)
-ADMIN_GROUP=$(yq '.platform.admin.group' config/infrastructure.yaml)
+ADMIN_USER=$(yq '.platform.admin.user' conf/infrastructure.yaml)
+ADMIN_GROUP=$(yq '.platform.admin.group' conf/infrastructure.yaml)
 
 # SSH public key from environment
 if [ -z "$ADMIN_SSH_PUBLIC_KEY" ]; then
@@ -57,17 +57,17 @@ cd ..
 
 ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml \
   --private-key /tmp/ansible_key \
-  -e "infra_platform_kubernetes_version=$(yq '.platform.kubernetes.version' config/infrastructure.yaml)" \
-  -e "infra_platform_kubernetes_pod_network_cidr=$(yq '.platform.kubernetes.pod_network_cidr' config/infrastructure.yaml)" \
-  -e "infra_platform_kubernetes_calico_version=$(yq '.platform.kubernetes.calico_version' config/infrastructure.yaml)" \
+  -e "infra_platform_kubernetes_version=$(yq '.platform.kubernetes.version' conf/infrastructure.yaml)" \
+  -e "infra_platform_kubernetes_pod_network_cidr=$(yq '.platform.kubernetes.pod_network_cidr' conf/infrastructure.yaml)" \
+  -e "infra_platform_kubernetes_calico_version=$(yq '.platform.kubernetes.calico_version' conf/infrastructure.yaml)" \
   -e "infra_service_domain=$SERVICE_DOMAIN" \
   -e "infra_admin_user=$ADMIN_USER" \
   -e "infra_admin_group=$ADMIN_GROUP" \
   -e "infra_ssh_key_file=/tmp/ssh_key.pub"
 
-CLUSTER_NAMES=$(yq '.clusters[].name' config/infrastructure.yaml | paste -sd ',' -)
+CLUSTER_NAMES=$(yq '.clusters[].name' conf/infrastructure.yaml | paste -sd ',' -)
 
-for KC_ENTRY in $(yq '.services.instances.keycloak[] | .name + ":" + (.port | tostring)' config/infrastructure.yaml); do
+for KC_ENTRY in $(yq '.services.instances.keycloak[] | .name + ":" + (.port | tostring)' conf/infrastructure.yaml); do
   KC_NAME=$(echo "$KC_ENTRY" | cut -d: -f1)
   KC_PORT=$(echo "$KC_ENTRY" | cut -d: -f2)
 
@@ -86,8 +86,8 @@ for KC_ENTRY in $(yq '.services.instances.keycloak[] | .name + ":" + (.port | to
       --private-key /tmp/ansible_key \
       -e "kc_project_name=$KC_NAME" \
       -e "infra_service_domain=$SERVICE_DOMAIN" \
-      -e "infra_platform_keycloak_realm=$(yq '.platform.keycloak.realm' config/infrastructure.yaml)" \
-      -e "infra_platform_keycloak_auth_realm=$(yq '.platform.keycloak.auth_realm' config/infrastructure.yaml)" \
-      -e "infra_platform_keycloak_admin_user=$(yq '.platform.keycloak.admin_user' config/infrastructure.yaml)" \
+      -e "infra_platform_keycloak_realm=$(yq '.platform.keycloak.realm' conf/infrastructure.yaml)" \
+      -e "infra_platform_keycloak_auth_realm=$(yq '.platform.keycloak.auth_realm' conf/infrastructure.yaml)" \
+      -e "infra_platform_keycloak_admin_user=$(yq '.platform.keycloak.admin_user' conf/infrastructure.yaml)" \
       -e "infra_platform_cluster_names=$CLUSTER_NAMES"
 done

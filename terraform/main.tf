@@ -43,11 +43,11 @@ data "vault_generic_secret" "proxmox" {
 provider "proxmox" {
   endpoint  = data.vault_generic_secret.proxmox.data["endpoint"]
   api_token = data.vault_generic_secret.proxmox.data["api_token"]
-  insecure  = try(yamldecode(file("${path.root}/../config/infrastructure.yaml")).platform.proxmox.tls_self_signed, false)
+  insecure  = try(yamldecode(file("${path.root}/../conf/infrastructure.yaml")).platform.proxmox.tls_self_signed, false)
 }
 
 locals {
-  infra = yamldecode(file("${path.root}/../config/infrastructure.yaml"))
+  infra = yamldecode(file("${path.root}/../conf/infrastructure.yaml"))
 
   managed_clusters = [
     for c in try(local.infra.clusters, []) : c

@@ -39,7 +39,7 @@ Trigger the `enforce-iac` workflow via Forgejo or:
 
 ## What you can do with this
 
-By editing the `config/infrastructure.yaml` file, then committing and doing a git push, you can:
+By editing the `conf/infrastructure.yaml` file, then committing and doing a git push, you can:
 
 - Create a new Kubernetes cluster (e.g., add a `banana` cluster with 1 control plane + 2 workers)
 - Scale an existing cluster's worker nodes (e.g., from 2 to 3)

@@ -10,7 +10,7 @@ TEMPLATE_NET0="vmbr0"
 IMG_DIR="/home/warelock/projects/create_golden_image_vm/images"
 CLOUDIMG_FILE="ubuntu-26.04-server-cloudimg-amd64.img"
 GOLDENIMG_FILE="ubuntu-26.04-server-goldenimg-amd64.img"
-FORGEJO_RAW_URL="https://forgejo.afobl.com/warelock/infraops/raw/branch/master/config/infrastructure.yaml"
+FORGEJO_RAW_URL="https://forgejo.afobl.com/warelock/infraops/raw/branch/master/conf/infrastructure.yaml"
 
 # --- Fetch nats CLI version from infrastructure.yaml ---
 NATS_CLI_VERSION=$(curl -sf "$FORGEJO_RAW_URL" | yq -p yaml '.platform.nats.cli_version' -)

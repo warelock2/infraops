@@ -5,7 +5,7 @@
 # Usage:
 #   scripts/push-infra-images.sh [--k8s-version v1.33.0] [--calico-version v3.29.2]
 #
-# Versions default to the literals in config/infrastructure.yaml.
+# Versions default to the literals in conf/infrastructure.yaml.
 # Set FORGEJO_TOKEN to authenticate non-interactively; otherwise docker
 # prompts for credentials.
 set -eu
@@ -34,10 +34,10 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$K8S_VERSION" ]; then
-  K8S_VERSION="v$(yq '.platform.kubernetes.version' config/infrastructure.yaml)"
+  K8S_VERSION="v$(yq '.platform.kubernetes.version' conf/infrastructure.yaml)"
 fi
 if [ -z "$CALICO_VERSION" ]; then
-  CALICO_VERSION="$(yq '.platform.kubernetes.calico_version' config/infrastructure.yaml)"
+  CALICO_VERSION="$(yq '.platform.kubernetes.calico_version' conf/infrastructure.yaml)"
   case "$CALICO_VERSION" in
     v*) ;;
     *) CALICO_VERSION="v${CALICO_VERSION}" ;;

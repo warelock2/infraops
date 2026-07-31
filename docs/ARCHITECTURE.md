@@ -12,7 +12,7 @@ The InfraOps philosophy draws a bright line between infrastructure code (for Inf
 
 | Component | Purpose |
 |-----------|---------|
-| `config/infrastructure.yaml` | Single source of truth. Defines clusters, hosts, services, platform config. |
+| `conf/infrastructure.yaml` | Single source of truth. Defines clusters, hosts, services, platform config. |
 | **Terraform** | Provisions Proxmox VMs, allocates IPs, manages DNS records via pfSense. |
 | **Ansible** | Configures VMs — kernel tuning, kubeadm init/join, keepalived, haproxy, Calico. |
 | **HashiCorp Vault** | Stores secrets (Proxmox API tokens, pfSense API keys). Mounted at `secret/infraops/`. |
@@ -111,8 +111,8 @@ graph TD
 
 ```mermaid
 graph LR
-    YAML["config/infrastructure.yaml"]
-    SCHEMA["config/infrastructure.schema.yaml"]
+    YAML["conf/infrastructure.yaml"]
+    SCHEMA["conf/infrastructure.schema.yaml"]
 
     subgraph "Validation"
         CHECK["check-jsonschema"]
@@ -211,7 +211,7 @@ graph LR
 
 ### Pre-Push Hook
 
-`githooks/pre-push` (installed via `git config core.hooksPath githooks`) blocks direct pushes to the public `github` and `dmz` remotes so `config/infrastructure.yaml` can never leave the local repository. The source of truth lives on the private `origin` remote; the public mirrors are updated via `~/bin/push_public`, which pushes a sanitized copy of the branch with the file removed from all history. The file contains personal network configuration (IPs, hostnames, API tokens).
+`githooks/pre-push` (installed via `git config core.hooksPath githooks`) blocks direct pushes to the public `github` and `dmz` remotes so `conf/infrastructure.yaml` can never leave the local repository. The source of truth lives on the private `origin` remote; the public mirrors are updated via `~/bin/push_public`, which pushes a sanitized copy of the branch with the file removed from all history. The file contains personal network configuration (IPs, hostnames, API tokens).
 
 ## Key Design Decisions
 
