@@ -3,13 +3,21 @@
 # Forgejo container registry so cluster builds don't depend on remote pulls.
 #
 # Usage:
-#   docker login forgejo.afobl.com
 #   scripts/push-infra-images.sh [--k8s-version v1.33.0] [--calico-version v3.29.2]
 #
 # Versions default to the literals in config/infrastructure.yaml.
+# Set FORGEJO_TOKEN to authenticate non-interactively; otherwise docker
+# prompts for credentials.
 set -eu
 
 REPO="forgejo.afobl.com/warelock"
+
+echo "=== Authenticating to $REPO ==="
+if [ -n "${FORGEJO_TOKEN:-}" ]; then
+  echo "$FORGEJO_TOKEN" | docker login forgejo.afobl.com --username warelock --password-stdin
+else
+  docker login forgejo.afobl.com
+fi
 
 # Auxiliary kubeadm images are pinned per Kubernetes release.
 # Keep this in sync with: kubeadm config images list --kubernetes-version v<k8s>
