@@ -50,7 +50,7 @@ case "$K8S_VERSION" in
 esac
 
 echo "=== Pushing kubeadm images ($K8S_VERSION) to $REPO ==="
-KUBEADM_IMAGES="kube-apiserver kube-controller-manager kube-scheduler kube-proxy $AUX_IMAGES"
+KUBEADM_IMAGES="kube-apiserver:${K8S_VERSION} kube-controller-manager:${K8S_VERSION} kube-scheduler:${K8S_VERSION} kube-proxy:${K8S_VERSION} $AUX_IMAGES"
 for img in $KUBEADM_IMAGES; do
   name="${img%%:*}"
   tag="${img##*:}"
