@@ -211,7 +211,7 @@ graph LR
 
 ### Pre-Push Hook
 
-`.git/hooks/pre-push` silently drops `config/infrastructure.yaml` from pushes to `github` and `dmz` remotes. The file contains personal network configuration (IPs, hostnames, API tokens) and must never leave the local repository.
+`githooks/pre-push` (installed via `git config core.hooksPath githooks`) blocks direct pushes to the public `github` and `dmz` remotes so `config/infrastructure.yaml` can never leave the local repository. The source of truth lives on the private `origin` remote; the public mirrors are updated via `~/bin/push_public`, which pushes a sanitized copy of the branch with the file removed from all history. The file contains personal network configuration (IPs, hostnames, API tokens).
 
 ## Key Design Decisions
 

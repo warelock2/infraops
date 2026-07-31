@@ -19,9 +19,9 @@ else
   docker login forgejo.afobl.com
 fi
 
-# Auxiliary kubeadm images are pinned per Kubernetes release.
-# Keep this in sync with: kubeadm config images list --kubernetes-version v<k8s>
-KUBEADM_AUX_v1_33_0="etcd:3.5.21-0 coredns:v1.12.0 pause:3.10"
+# Pinned fallback map when kubeadm is not installed on the host.
+# Keep in sync with: kubeadm config images list --kubernetes-version v<k8s>
+KUBEADM_AUX_v1_33_0="registry.k8s.io/coredns/coredns:v1.12.0 registry.k8s.io/pause:3.10 registry.k8s.io/etcd:3.5.21-0"
 
 K8S_VERSION=""
 CALICO_VERSION=""
@@ -44,23 +44,28 @@ if [ -z "$CALICO_VERSION" ]; then
   esac
 fi
 
-case "$K8S_VERSION" in
-  v1.33.0) AUX_IMAGES="$KUBEADM_AUX_v1_33_0";;
-  *) echo "ERROR: no auxiliary image map for $K8S_VERSION (add it to the script)" >&2; exit 1;;
-esac
+# Derive the kubeadm image list. Prefer the kubeadm binary when available;
+# otherwise fall back to the pinned map for known releases.
+if command -v kubeadm >/dev/null 2>&1; then
+  KUBEADM_IMAGES=$(kubeadm config images list --kubernetes-version "$K8S_VERSION" 2>/dev/null || true)
+fi
+if [ -z "${KUBEADM_IMAGES:-}" ]; then
+  case "$K8S_VERSION" in
+    v1.33.0)
+      KUBEADM_IMAGES="registry.k8s.io/kube-apiserver:${K8S_VERSION} registry.k8s.io/kube-controller-manager:${K8S_VERSION} registry.k8s.io/kube-scheduler:${K8S_VERSION} registry.k8s.io/kube-proxy:${K8S_VERSION} $KUBEADM_AUX_v1_33_0";;
+    *)
+      echo "ERROR: kubeadm not installed and no pinned image map for $K8S_VERSION (add it to the script)" >&2
+      exit 1;;
+  esac
+fi
 
 echo "=== Pushing kubeadm images ($K8S_VERSION) to $REPO ==="
-KUBEADM_IMAGES="kube-apiserver:${K8S_VERSION} kube-controller-manager:${K8S_VERSION} kube-scheduler:${K8S_VERSION} kube-proxy:${K8S_VERSION} $AUX_IMAGES"
-for img in $KUBEADM_IMAGES; do
-  name="${img%%:*}"
-  tag="${img##*:}"
-  # coredns lives under registry.k8s.io/coredns/coredns (nested path)
-  # but kubeadm flattens it to just "coredns" with a custom imageRepository.
-  if [ "$name" = "coredns" ]; then
-    src="registry.k8s.io/coredns/coredns:${tag}"
-  else
-    src="registry.k8s.io/${name}:${tag}"
-  fi
+for src in $KUBEADM_IMAGES; do
+  # name/tag from the last path segment, so nested paths (coredns/coredns)
+  # are flattened to a single name in the local registry.
+  name="${src##*/}"
+  name="${name%%:*}"
+  tag="${src##*:}"
   dst="${REPO}/${name}:${tag}"
   echo "--- $src -> $dst"
   docker pull "$src"
@@ -77,5 +82,22 @@ for name in cni node kube-controllers; do
   docker tag "$src" "$dst"
   docker push "$dst"
 done
+
+echo "=== Pushing runner job container to $REPO ==="
+src="node:20-bullseye"
+dst="${REPO}/node:20-bullseye"
+echo "--- $src -> $dst"
+docker pull "$src"
+docker tag "$src" "$dst"
+docker push "$dst"
+
+echo "=== Pushing Keycloak image to $REPO ==="
+KEYCLOAK_VERSION="$(yq '.platform.keycloak.container_image' config/infrastructure.yaml)"
+src="${KEYCLOAK_VERSION:-quay.io/keycloak/keycloak:latest}"
+dst="${REPO}/keycloak:latest"
+echo "--- $src -> $dst"
+docker pull "$src"
+docker tag "$src" "$dst"
+docker push "$dst"
 
 echo "=== Done ==="
