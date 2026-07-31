@@ -54,7 +54,13 @@ KUBEADM_IMAGES="kube-apiserver:${K8S_VERSION} kube-controller-manager:${K8S_VERS
 for img in $KUBEADM_IMAGES; do
   name="${img%%:*}"
   tag="${img##*:}"
-  src="registry.k8s.io/${name}:${tag}"
+  # coredns lives under registry.k8s.io/coredns/coredns (nested path)
+  # but kubeadm flattens it to just "coredns" with a custom imageRepository.
+  if [ "$name" = "coredns" ]; then
+    src="registry.k8s.io/coredns/coredns:${tag}"
+  else
+    src="registry.k8s.io/${name}:${tag}"
+  fi
   dst="${REPO}/${name}:${tag}"
   echo "--- $src -> $dst"
   docker pull "$src"
