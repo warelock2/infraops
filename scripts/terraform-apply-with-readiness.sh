@@ -9,16 +9,16 @@ READINESS_TIMEOUT=1200
 
 echo "=== Computing expected VMs ==="
 EXPECTED_VMS=""
-CLUSTER_COUNT=$(yq ".clusters | length" config/infrastructure.yaml)
+CLUSTER_COUNT=$(yq ".clusters | length" conf/infrastructure.yaml)
 for i in $(seq 0 $((CLUSTER_COUNT - 1))); do
-  CLUSTER_NAME=$(yq ".clusters[$i].name" config/infrastructure.yaml)
-  CLUSTER_TYPE=$(yq ".clusters[$i].cluster_type // .defaults.cluster_type" config/infrastructure.yaml)
-  CP_NODES=$(yq ".clusters[$i].control_plane.nodes // 0" config/infrastructure.yaml)
-  WORKER_NODES=$(yq ".clusters[$i].workers.nodes // 0" config/infrastructure.yaml)
-  CP_PLANE_NAME=$(yq ".clusters[$i].plane_defaults.control_plane.plane_name // .defaults.planes.control_plane.plane_name" config/infrastructure.yaml)
-  WORKER_PLANE_NAME=$(yq ".clusters[$i].plane_defaults.workers.plane_name // .defaults.planes.workers.plane_name" config/infrastructure.yaml)
-  CP_VM_ID_START=$(yq ".clusters[$i].control_plane.vm_id_start" config/infrastructure.yaml)
-  WORKER_VM_ID_START=$(yq ".clusters[$i].workers.vm_id_start" config/infrastructure.yaml)
+  CLUSTER_NAME=$(yq ".clusters[$i].name" conf/infrastructure.yaml)
+  CLUSTER_TYPE=$(yq ".clusters[$i].cluster_type // .defaults.cluster_type" conf/infrastructure.yaml)
+  CP_NODES=$(yq ".clusters[$i].control_plane.nodes // 0" conf/infrastructure.yaml)
+  WORKER_NODES=$(yq ".clusters[$i].workers.nodes // 0" conf/infrastructure.yaml)
+  CP_PLANE_NAME=$(yq ".clusters[$i].plane_defaults.control_plane.plane_name // .defaults.planes.control_plane.plane_name" conf/infrastructure.yaml)
+  WORKER_PLANE_NAME=$(yq ".clusters[$i].plane_defaults.workers.plane_name // .defaults.planes.workers.plane_name" conf/infrastructure.yaml)
+  CP_VM_ID_START=$(yq ".clusters[$i].control_plane.vm_id_start" conf/infrastructure.yaml)
+  WORKER_VM_ID_START=$(yq ".clusters[$i].workers.vm_id_start" conf/infrastructure.yaml)
   for n in $(seq 1 $CP_NODES); do
     NUM=$(printf "%02d" $n)
     HOSTNAME="${CLUSTER_TYPE}-${CLUSTER_NAME}-${CP_PLANE_NAME}-${NUM}"
@@ -67,7 +67,7 @@ for RETRY in $(seq 1 $MAX_RETRIES); do
     terraform -chdir=terraform state rm "proxmox_virtual_environment_vm.vm[\"$HOSTNAME\"]" 2>/dev/null || true
     
     echo "Deleting VM $HOSTNAME via Proxmox API..."
-    PROXMOX_NODE=$(yq ".platform.proxmox.node" config/infrastructure.yaml)
+    PROXMOX_NODE=$(yq ".platform.proxmox.node" conf/infrastructure.yaml)
     curl -k -sS -f -X DELETE \
       -H "Authorization: Bearer $(vault kv get -field=api_token secret/infraops/proxmox)" \
       -w "\n  -> HTTP %{http_code}\n" \

@@ -19,8 +19,8 @@ jobs:
             chmod 755 /usr/local/bin/yq &&
             yq -V | grep -q mikefarah &&
             pip install -q --root-user-action=ignore check-jsonschema &&
-            check-jsonschema --schemafile config/infrastructure.schema.yaml
-            config/infrastructure.yaml"
+            check-jsonschema --schemafile conf/infrastructure.schema.yaml
+            conf/infrastructure.yaml"
 
       - name: Terraform Init and Generate Inventory
         uses: docker://alpine/ansible:latest
@@ -30,7 +30,7 @@ jobs:
             wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&
             chmod 755 /usr/local/bin/yq &&
             yq -V | grep -q mikefarah &&
-            TF_VERSION=$(yq .platform.terraform.version config/infrastructure.yaml) &&
+            TF_VERSION=$(yq .platform.terraform.version conf/infrastructure.yaml) &&
             curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
             unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
             cd terraform &&
@@ -58,17 +58,17 @@ jobs:
             echo "$ANSIBLE_SSH_PRIVATE_KEY" > /tmp/ansible_key &&
             chmod 600 /tmp/ansible_key &&
             export ANSIBLE_CONFIG=$PWD/ansible/ansible.cfg &&
-            SERVICE_HOST=$(yq .defaults.service_host config/infrastructure.yaml) &&
-            DNS_DOMAIN=$(yq .platform.proxmox.dns_domain config/infrastructure.yaml) &&
+            SERVICE_HOST=$(yq .defaults.service_host conf/infrastructure.yaml) &&
+            DNS_DOMAIN=$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
             SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}" &&
             ansible-playbook -i ansible/inventory.json ansible/playbooks/k8s-cluster.yaml
             --private-key /tmp/ansible_key
-            -e infra_platform_kubernetes_version=$(yq .platform.kubernetes.version config/infrastructure.yaml)
-            -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr config/infrastructure.yaml)
-            -e infra_platform_kubernetes_calico_version=$(yq .platform.kubernetes.calico_version config/infrastructure.yaml)
+            -e infra_platform_kubernetes_version=$(yq .platform.kubernetes.version conf/infrastructure.yaml)
+            -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr conf/infrastructure.yaml)
+            -e infra_platform_kubernetes_calico_version=$(yq .platform.kubernetes.calico_version conf/infrastructure.yaml)
             -e infra_service_domain=$SERVICE_DOMAIN
-            -e infra_admin_user=$(yq .platform.admin.user config/infrastructure.yaml)
-            -e infra_admin_group=$(yq .platform.admin.group config/infrastructure.yaml)
+            -e infra_admin_user=$(yq .platform.admin.user conf/infrastructure.yaml)
+            -e infra_admin_group=$(yq .platform.admin.group conf/infrastructure.yaml)
             -e infra_ssh_key_file=/tmp/ssh_key.pub'
         env:
           ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}

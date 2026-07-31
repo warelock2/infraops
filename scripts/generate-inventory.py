@@ -2,7 +2,7 @@
 """
 Generate Ansible inventory from infrastructure.yaml.
 
-Reads the single source of truth (config/infrastructure.yaml) and outputs
+Reads the single source of truth (conf/infrastructure.yaml) and outputs
 a JSON inventory that Ansible can consume directly. This replaces the
 Terraform output-based inventory generation.
 
@@ -17,7 +17,7 @@ import yaml
 from pathlib import Path
 
 
-def load_infrastructure(config_path: str = "config/infrastructure.yaml") -> dict:
+def load_infrastructure(config_path: str = "conf/infrastructure.yaml") -> dict:
     """Load and parse infrastructure.yaml."""
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
@@ -117,8 +117,8 @@ def main():
     parser = argparse.ArgumentParser(description="Generate Ansible inventory from infrastructure.yaml")
     parser.add_argument(
         "--config",
-        default="config/infrastructure.yaml",
-        help="Path to infrastructure.yaml (default: config/infrastructure.yaml)",
+        default="conf/infrastructure.yaml",
+        help="Path to infrastructure.yaml (default: conf/infrastructure.yaml)",
     )
     parser.add_argument(
         "--output",

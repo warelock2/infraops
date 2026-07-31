@@ -26,8 +26,8 @@ jobs:
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c "check-jsonschema --schemafile config/infrastructure.schema.yaml
-            config/infrastructure.yaml"
+            sh -c "check-jsonschema --schemafile conf/infrastructure.schema.yaml
+            conf/infrastructure.yaml"
 
       - name: Generate Diagram
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
@@ -96,7 +96,7 @@ jobs:
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c "CLUSTERS=$(yq '.clusters | length' config/infrastructure.yaml) &&
+            sh -c "CLUSTERS=$(yq '.clusters | length' conf/infrastructure.yaml) &&
             echo \"has_clusters=$([ \"$CLUSTERS\" -gt 0 ] && echo true || echo false)\" >> $GITHUB_OUTPUT"
 
       - name: K8s Drain Removed Nodes
@@ -154,7 +154,7 @@ jobs:
         with:
           args: >
             sh -c '
-            K8S_VERSION=$(yq .platform.kubernetes.version config/infrastructure.yaml) &&
+            K8S_VERSION=$(yq .platform.kubernetes.version conf/infrastructure.yaml) &&
             curl -sLO https://dl.k8s.io/release/v${K8S_VERSION}/bin/linux/amd64/kubectl &&
             chmod +x kubectl &&
             mv kubectl /usr/local/bin/ &&
@@ -164,19 +164,19 @@ jobs:
             echo "$ANSIBLE_SSH_PRIVATE_KEY" > /tmp/ansible_key &&
             chmod 600 /tmp/ansible_key &&
             export ANSIBLE_CONFIG=$PWD/ansible/ansible.cfg &&
-            SERVICE_HOST=$(yq .defaults.service_host config/infrastructure.yaml) &&
-            DNS_DOMAIN=$(yq .platform.proxmox.dns_domain config/infrastructure.yaml) &&
+            SERVICE_HOST=$(yq .defaults.service_host conf/infrastructure.yaml) &&
+            DNS_DOMAIN=$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
             SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}" &&
             GIT_COMMIT="${GITHUB_SHA::8}" &&
             GIT_TAG="${GITHUB_REF_NAME}" &&
             ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml
             --private-key /tmp/ansible_key
-            -e infra_platform_kubernetes_version=$(yq .platform.kubernetes.version config/infrastructure.yaml)
-            -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr config/infrastructure.yaml)
-            -e infra_platform_kubernetes_calico_version=$(yq .platform.kubernetes.calico_version config/infrastructure.yaml)
+            -e infra_platform_kubernetes_version=$(yq .platform.kubernetes.version conf/infrastructure.yaml)
+            -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr conf/infrastructure.yaml)
+            -e infra_platform_kubernetes_calico_version=$(yq .platform.kubernetes.calico_version conf/infrastructure.yaml)
             -e infra_service_domain=$SERVICE_DOMAIN
-            -e infra_admin_user=$(yq .platform.admin.user config/infrastructure.yaml)
-            -e infra_admin_group=$(yq .platform.admin.group config/infrastructure.yaml)
+            -e infra_admin_user=$(yq .platform.admin.user conf/infrastructure.yaml)
+            -e infra_admin_group=$(yq .platform.admin.group conf/infrastructure.yaml)
             -e infra_ssh_key_file=/tmp/ssh_key.pub
             -e git_commit=$GIT_COMMIT
             -e git_tag=$GIT_TAG'
