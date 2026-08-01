@@ -5,7 +5,7 @@ ARG VAULT_VERSION=1.17.3
 ARG NATS_CLI_VERSION
 ARG KUBECTL_VERSION=1.33.0
 
-RUN apk add --no-cache curl unzip jq python3 py3-pip py3-requests py3-yaml wget git && \
+RUN apk add --no-cache curl unzip jq python3 py3-pip py3-requests py3-yaml wget git openssh-client && \
     # --- binaries ---
     wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq && \
     chmod 755 /usr/local/bin/yq && \
