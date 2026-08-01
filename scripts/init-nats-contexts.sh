@@ -41,7 +41,7 @@ Examples:
   curl -sfL ... | bash -s -- --contexts=production
 
 To delete a context in the future:
-  nats context delete <context-name>
+  nats context rm <context-name>
 
 Prerequisites:
   - vault CLI with valid token (VAULT_TOKEN, pass tokens/vault-prod, or ~/.vault-token)

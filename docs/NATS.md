@@ -67,7 +67,7 @@ scripts/init-nats-contexts.sh --help
 `nats context ls` lists configured contexts. To delete a context:
 
 ```bash
-nats context delete <context-name>
+nats context rm <context-name>
 ```
 
 ## Rotating Passwords
@@ -120,7 +120,7 @@ nats stream delete infraops --context=production
   2. `pass tokens/vault-prod`
   3. `~/.vault-token`
 
-Read contexts (`--contexts=...` without `--rotate`) need only read access to `secret/infraops/nats`. `--rotate` additionally needs write access.
+Read contexts need only read access to `secret/infraops/nats`.
 
 ## Troubleshooting
 
