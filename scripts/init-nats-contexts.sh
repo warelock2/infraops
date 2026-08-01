@@ -8,7 +8,6 @@ set -eu
 SERVER="tls://midas.afobl.com:4222"
 VAULT_PATH="secret/infraops/nats"
 ALL_CONTEXTS="system production vm iac-orchestrator"
-PASSWORD_LENGTH=24
 
 usage() {
   cat <<EOF
@@ -20,10 +19,6 @@ Options:
   --contexts=LIST    Comma-separated list of contexts to configure
                      (default: all)
                      Valid: $ALL_CONTEXTS
-  --rotate           Generate new $PASSWORD_LENGTH-char passwords, write them to
-                     Vault ($VAULT_PATH), then configure the requested contexts
-                     with the new passwords.
-                     Requires a Vault token with write access to $VAULT_PATH.
   --help             Show this help message
 
 Examples:
@@ -35,12 +30,6 @@ Examples:
 
   # Configure a single context
   init-nats-contexts.sh --contexts=production
-
-  # Rotate all passwords in Vault, then reconfigure all contexts
-  init-nats-contexts.sh --rotate
-
-  # Rotate passwords and reconfigure only the production context
-  init-nats-contexts.sh --rotate --contexts=production
 
   # Remote execution (new machine, no repo clone)
   curl -sfL https://forgejo.afobl.com/warelock/infraops/raw/branch/master/scripts/init-nats-contexts.sh | bash
@@ -59,6 +48,8 @@ Prerequisites:
   - jq
   - nats CLI
   - Network access to Vault and NATS ($SERVER)
+
+To rotate passwords, see docs/NATS.md (server-side: update_service_auth_creds.sh --rotate --restart).
 EOF
 }
 
@@ -72,14 +63,10 @@ done
 
 # --- Parse arguments ---
 REQUESTED=""
-ROTATE=0
 for arg in "$@"; do
   case "$arg" in
     --contexts=*)
       REQUESTED="${arg#*=}"
-      ;;
-    --rotate)
-      ROTATE=1
       ;;
     --help|-h)
       usage
@@ -128,26 +115,6 @@ if [ -z "${VAULT_TOKEN:-}" ]; then
   fi
 fi
 export VAULT_TOKEN
-
-# --- Rotate: generate new passwords and write them to Vault ---
-if [ "$ROTATE" = "1" ]; then
-  echo "=== Generating new NATS passwords ==="
-  gen_password() {
-    tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$PASSWORD_LENGTH"
-  }
-  NEW_SYS_PW=$(gen_password)
-  NEW_APP_PW=$(gen_password)
-  NEW_VM_PW=$(gen_password)
-  NEW_IAC_PW=$(gen_password)
-
-  echo "=== Writing new passwords to Vault ($VAULT_PATH) ==="
-  vault kv put "$VAULT_PATH" \
-    sys_password="$NEW_SYS_PW" \
-    app_password="$NEW_APP_PW" \
-    vm_password="$NEW_VM_PW" \
-    iac_orchestrator_password="$NEW_IAC_PW"
-  echo "  ok: passwords rotated in Vault"
-fi
 
 # --- Fetch passwords from Vault ---
 echo "=== Reading NATS passwords from Vault ==="
