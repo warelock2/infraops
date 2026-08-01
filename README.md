@@ -29,6 +29,22 @@ Then switch to the context:
 kubectl config use-context kubernetes-admin@kubernetes
 ```
 
+### Configure a NATS Client
+
+Configure NATS client contexts (passwords fetched from Vault, no secrets in this repo):
+
+```bash
+curl -sfL https://YOUR_FORGEJO_URL/warelock/infraops/raw/branch/master/scripts/init-nats-contexts.sh | bash
+```
+
+Select a subset:
+
+```bash
+curl -sfL https://YOUR_FORGEJO_URL/warelock/infraops/raw/branch/master/scripts/init-nats-contexts.sh | bash -s -- --contexts=system,production
+```
+
+Requirements: `vault` (with token), `jq`, `nats`. See [docs/NATS.md](docs/NATS.md) for full setup, rotation, and troubleshooting.
+
 ### Deploy a Cluster
 
 Trigger the `enforce-iac` workflow via Forgejo or:
