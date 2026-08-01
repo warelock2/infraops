@@ -17,7 +17,7 @@ echo "NATS CLI version: $NATS_CLI_VERSION"
 docker login forgejo.afobl.com
 
 echo "Building $IMAGE from $DOCKERFILE..."
-docker build --build-arg NATS_CLI_VERSION="$NATS_CLI_VERSION" -t "$IMAGE" -f "$DOCKERFILE" docker/ci-base/
+docker build --no-cache --build-arg NATS_CLI_VERSION="$NATS_CLI_VERSION" -t "$IMAGE" -f "$DOCKERFILE" docker/ci-base/
 
 echo "Pushing $IMAGE..."
 docker push "$IMAGE"
