@@ -13,7 +13,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 BASE = Path(__file__).resolve().parent.parent
-INFRA_PATH = BASE / "config" / "infrastructure.yaml"
+INFRA_PATH = BASE / "conf" / "infrastructure.yaml"
 
 PADDING = 30
 NODE_W = 140
