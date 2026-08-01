@@ -46,14 +46,6 @@ Configure a **single** context:
 curl -sfL https://forgejo.afobl.com/warelock/infraops/raw/branch/master/scripts/init-nats-contexts.sh | bash -s -- --contexts=production
 ```
 
-**Rotate** passwords (write new passwords to Vault, then reconfigure contexts):
-
-```bash
-curl -sfL https://forgejo.afobl.com/warelock/infraops/raw/branch/master/scripts/init-nats-contexts.sh | bash -s -- --rotate
-```
-
-Requires a Vault token with write access to `secret/infraops/nats`. See [Rotating Passwords](#rotating-passwords).
-
 ### Local Execution
 
 If the repo is cloned locally:
@@ -62,7 +54,6 @@ If the repo is cloned locally:
 scripts/init-nats-contexts.sh
 scripts/init-nats-contexts.sh --contexts=system,production
 scripts/init-nats-contexts.sh --contexts=production
-scripts/init-nats-contexts.sh --rotate
 ```
 
 View full usage:
@@ -83,16 +74,16 @@ nats context delete <context-name>
 
 Rotation is a coordinated two-step process because the NATS server and its clients must agree on passwords:
 
-1. **Server side** — regenerate `conf/nats-server.conf` from Vault and restart NATS. In the midas project:
+1. **Server side** — rotate the passwords in Vault, render `conf/nats-server.conf`, and restart NATS. In the midas project on the docker host (operator only, requires Vault write access):
    ```bash
-   scripts/update_service_auth_creds.sh --restart
+   scripts/update_service_auth_creds.sh --rotate --restart
    ```
-2. **Client side** — on each machine that holds NATS contexts, rotate and refresh:
-   ```bash
-   curl -sfL https://forgejo.afobl.com/warelock/infraops/raw/branch/master/scripts/init-nats-contexts.sh | bash -s -- --rotate
-   ```
+   `--rotate` generates new 24-character passwords, writes them to Vault, then renders the server config with them. `--restart` applies the change. Run with `--rotate` alone to render without restarting.
 
-`--rotate` generates new 24-character passwords, writes them to Vault, then reconfigures the requested contexts with the new values.
+2. **Client side** — on each machine that holds NATS contexts, refresh them from the new Vault values:
+   ```bash
+   curl -sfL https://forgejo.afobl.com/warelock/infraops/raw/branch/master/scripts/init-nats-contexts.sh | bash
+   ```
 
 After rotation, if VMs use the `vm` context for bootstrap signaling, regenerate the Proxmox cloud-init snippet with the new `vm_password`:
 
@@ -157,8 +148,8 @@ Install the missing CLI (`vault`, `jq`, or `nats`), then rerun.
 
 The server and clients are out of sync. Rerun the rotation in order:
 
-1. `scripts/update_service_auth_creds.sh --restart` (midas, server side)
-2. `init-nats-contexts.sh --rotate` (client side)
+1. `scripts/update_service_auth_creds.sh --rotate --restart` (midas, server side)
+2. `init-nats-contexts.sh` (client side, all machines)
 
 ### `nats: error reading server version`
 
