@@ -9,6 +9,9 @@ external_projects/
 
 *.bak
 
+# Accidental redirect artifacts
+{changed:
+
 # Artifacts created by running opencode in docker
 .bun
 .cache
