@@ -32,7 +32,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   echo "=== Attempt $RETRY/$MAX_RETRIES ==="
 
   if [ "$RETRY" -gt 1 ]; then
-    terraform -chdir=terraform init -reconfigure
+    sh scripts/terraform-init-retry.sh -chdir=terraform init -reconfigure
   fi
 
   # Plan to a file so we can inspect exactly what will be created
