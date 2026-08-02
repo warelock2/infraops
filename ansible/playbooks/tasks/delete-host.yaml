@@ -2,7 +2,12 @@
 # Delete a single DNS host override from the IAC pool.
 # Expects: target_item.hostname, target_item.domain
 # Also cleans up API DNS entry if no cluster-named hosts remain.
+# Called in a loop from run-step.yaml with loop_var=step.
 
+# The pfSense API deletes by query params (host + domain), so we look up the
+# override first, and skip entirely if it's already gone (idempotent). After
+# the DELETE we hit the apply endpoint — pfSense DNS changes only take effect
+# when the resolver config is re-applied.
 - name: Delete — find target in pool overrides
   ansible.builtin.set_fact:
     target_override: "{{ pool_overrides | selectattr('host', 'equalto', target_item.hostname) | selectattr('domain', 'equalto', target_item.domain) | list }}"

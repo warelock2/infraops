@@ -1,3 +1,16 @@
+# ===========================================================================
+# Keycloak realm + clients bootstrap (run against the docker_services host).
+#
+# Unlike the deploy play (which boots the container), this play configures
+# the Keycloak *content*: creates the infraops realm, the OIDC groups that
+# map to k8s RBAC (<cluster>-admins / -viewers, k8s-admins), and the
+# forgejo-automation client used by CI. Every call is guarded: if admin
+# credentials are rejected or the realm already exists, it ends the play
+# instead of mutating an existing setup — safe to re-run.
+#
+# Auth flow: POST to the OIDC token endpoint with admin credentials to get a
+# Bearer token, then use it in the Authorization header of Admin REST calls.
+# ===========================================================================
 ---
 - name: "Setup Keycloak: {{ kc_project_name | default('unknown') }}"
   hosts: docker_services
@@ -18,6 +31,11 @@
           must be set. Export them or add to inventory vars.
       when: not keycloak_auth_username or not keycloak_auth_password
 
+    # -----------------------------------------------------------------------
+    # Authenticate with the bootstrap admin account. 400/401 means the
+    # instance is already bootstrapped with different credentials -> skip;
+    # unreachable -> skip. Only proceed when we have a working token.
+    # -----------------------------------------------------------------------
     - name: Get Keycloak admin token
       ansible.builtin.uri:
         url: "{{ keycloak_url }}/realms/{{ keycloak_auth_realm }}/protocol/openid-connect/token"
@@ -94,6 +112,13 @@
         msg: "No cluster names provided via infra_platform_cluster_names."
       when: cluster_names | length == 0
 
+    # -----------------------------------------------------------------------
+    # Create the OIDC building blocks that k8s RBAC consumes:
+    # one OIDC client per cluster (the kube-apiserver's token validator, with
+    # group + audience claims) and one admin/viewer group per cluster.
+    # These group names are exactly what k8s-cluster.yaml Play 7 binds to
+    # ClusterRoles, so the two playbooks must agree on naming.
+    # -----------------------------------------------------------------------
     - name: Create Keycloak client for each cluster
       community.general.keycloak_client:
         auth_keycloak_url: "{{ keycloak_url }}"
@@ -158,6 +183,12 @@
         state: present
       loop: "{{ cluster_names }}"
 
+    # -----------------------------------------------------------------------
+    # forgejo-automation: a confidential (client-secret) service-account
+    # client CI uses to impersonate an automation identity. The blocks after
+    # creation fetch its UUID + secret and grant it realm-management roles
+    # via its service account, so CI's token carries real Admin API rights.
+    # -----------------------------------------------------------------------
     - name: Create forgejo-automation client
       community.general.keycloak_client:
         auth_keycloak_url: "{{ keycloak_url }}"

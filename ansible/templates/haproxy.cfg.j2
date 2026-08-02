@@ -1,3 +1,8 @@
+{# haproxy.cfg.j2 — TCP load balancer for the kube-apiserver.
+   Rendered per-node by k8s-cluster.yaml Play 3. mode tcp = L4 passthrough
+   (TLS is terminated by the API server, not here). Listens on :6443 and
+   round-robins to every control node's kubelet-apiserver port :6444 with a
+   health check, so the keepalived VIP always lands on a live API endpoint. #}
 global
   log /dev/log local0
   chroot /var/lib/haproxy

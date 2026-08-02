@@ -1,3 +1,12 @@
+# ===========================================================================
+# Install the QEMU guest agent on all k8s nodes.
+#
+# The guest agent lets Proxmox communicate with the VM (clean shutdowns,
+# guest IP reporting). It is normally installed by cloud-init at first boot;
+# this play is the idempotent safety net for nodes that missed it. It also
+# demonstrates the fact-gathering flow: wait for SSH, then ansible.setup
+# collects facts used by later conditionals.
+# ===========================================================================
 - name: Install and enable QEMU guest agent
   hosts: k8s_control:k8s_worker
   become: yes

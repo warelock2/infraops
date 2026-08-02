@@ -1,3 +1,12 @@
+# ===========================================================================
+# Ansible collections required by the playbooks.
+#
+# ansible-core ships NO bundled collections — every module in a FQCN like
+# community.general.modprobe or kubernetes.core.k8s comes from one of these.
+# Install with:
+#   ansible-galaxy collection install -r requirements.yaml
+# The ci-base image runs this at build time so CI always has them.
+# ===========================================================================
 collections:
   - community.general
   - community.hashi_vault

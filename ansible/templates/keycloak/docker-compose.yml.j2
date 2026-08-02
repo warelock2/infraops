@@ -1,3 +1,9 @@
+{# docker-compose.yml.j2 — Keycloak container definition.
+   Rendered by keycloak-deploy.yaml Play 2. HTTPS-only: the container binds
+   TLS on the internal port (kc_container_port) mapped to the host port
+   (kc_host_port). The bootstrap admin password comes from the .env file
+   (${KC_BOOTSTRAP_ADMIN_PASSWORD}) rather than being baked into compose,
+   so the secret never lands in the repo or the rendered manifest. #}
 services:
   {{ kc_container_name }}:
     image: "{{ kc_container_image }}"

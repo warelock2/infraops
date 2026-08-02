@@ -1,2 +1,4 @@
+# Group vars for hosts in the k8s_worker group (worker nodes).
+# Same role marker as k8s_control, but for workers.
 ---
 k8s_node_type: k8s_worker
