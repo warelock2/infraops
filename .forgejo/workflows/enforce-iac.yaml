@@ -192,12 +192,13 @@ jobs:
         with:
           args: >
             sh -c '
-            K8S_VERSION=$(yq .platform.kubernetes.version conf/infrastructure.yaml) &&
-            curl -sLO https://dl.k8s.io/release/v${K8S_VERSION}/bin/linux/amd64/kubectl &&
-            chmod +x kubectl &&
-            mv kubectl /usr/local/bin/ &&
             if [ -z "$ADMIN_SSH_PUBLIC_KEY" ]; then echo "ERROR: ADMIN_SSH_PUBLIC_KEY not set" && exit 1; fi &&
             if [ -z "$ANSIBLE_SSH_PRIVATE_KEY" ]; then echo "ERROR: ANSIBLE_SSH_PRIVATE_KEY not set" && exit 1; fi &&
+            K8S_VERSION=$(yq .platform.kubernetes.version conf/infrastructure.yaml) &&
+            BAKED_KUBECTL=$(kubectl version --client -o yaml | yq .clientVersion.gitVersion) &&
+            case "$BAKED_KUBECTL" in *"$K8S_VERSION"*) ;; *)
+              echo "ERROR: config k8s version $K8S_VERSION != baked kubectl $BAKED_KUBECTL; rebuild ci-base (KUBECTL_VERSION ARG)" && exit 1;;
+            esac &&
             echo "$ADMIN_SSH_PUBLIC_KEY" > /tmp/ssh_key.pub &&
             echo "$ANSIBLE_SSH_PRIVATE_KEY" > /tmp/ansible_key &&
             chmod 600 /tmp/ansible_key &&
