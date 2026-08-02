@@ -1,8 +1,8 @@
 #!/bin/bash
-# vischema — schema-validated editor for infrastructure.yaml
+# viinfra — schema-validated editor for infrastructure.yaml
 # Usage:
-#   vischema              # edit infrastructure.yaml with lint
-#   vischema --regen      # regenerate SCHEMA_REFERENCE.md from schema
+#   viinfra              # edit infrastructure.yaml with lint
+#   viinfra --regen      # regenerate SCHEMA_REFERENCE.md from schema
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
