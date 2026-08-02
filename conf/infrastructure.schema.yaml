@@ -1,3 +1,25 @@
+# ===========================================================================
+# JSON Schema for conf/infrastructure.yaml.
+#
+# WHAT THIS IS
+#   The contract that the single source of truth must obey. The CI pipeline
+#   runs `check-jsonschema --schemafile conf/infrastructure.schema.yaml
+#   conf/infrastructure.yaml`, so a field typo or missing key fails the build
+#   BEFORE Terraform/Ansible ever run. (Scripts also export this schema into
+#   docs via scripts/generate-schema-docs.py.)
+#
+# HOW TO READ IT
+#   Each top-level key (name, platform, defaults, clusters, hosts, services)
+#   is an object with properties. `required` lists keys that must exist,
+#   `default` is the fallback when a key is omitted, and `description`
+#   documents the meaning. `additionalProperties: false` means "no unknown
+#   keys allowed" — the strictest guard against drift.
+#
+# KEY DESIGN POINT
+#   The schema and infrastructure.yaml are the WHAT; Terraform (terraform/)
+#   and Ansible (ansible/) are the HOW. If you add a field to the YAML, add
+#   it here too, or the pipeline will reject it.
+# ===========================================================================
 $schema: "http://json-schema.org/draft-07/schema#"
 title: InfraOps Infrastructure
 description: Single source of truth for infrastructure layout

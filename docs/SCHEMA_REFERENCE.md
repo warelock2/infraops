@@ -35,6 +35,8 @@ Platform-specific configuration
 | `platform.kubernetes.oidc_issuer_url (2)` | string | — | `format: uri` | OIDC issuer URL for cluster authentication |
 | `platform.terraform (1)` | object | — | — | Terraform version configuration |
 | `platform.terraform.version (2)` | string | — | `pattern: ^[0-9]+\.[0-9]+\.[0-9]+$` | Terraform version constraint |
+| `platform.nats (1)` | object | — | — | NATS CLI configuration |
+| `platform.nats.cli_version (2)` | string | — | `pattern: ^[0-9]+\.[0-9]+\.[0-9]+$` | NATS CLI version to install in golden template and CI image |
 | `platform.proxmox (1)` | object | — | — | Proxmox VE host configuration |
 | `platform.proxmox.node (2)` | string | — | `minLength: 1` | Proxmox node name for VM placement |
 | `platform.proxmox.template_id (2)` | integer | — | `min: 100` | Proxmox template VM ID to clone from |
@@ -74,6 +76,7 @@ Type: `array`
 |---|---|---|---|---|
 | `clusters[].name (2)` | string | — | `minLength: 1` | Cluster name (used in resource naming and DNS) |
 | `clusters[].oidc_issuer_url (2)` | string | — | `format: uri` | OIDC issuer URL override for this cluster |
+| `clusters[].immutable (2)` | boolean | `False` | — | When true, configuration management skips this cluster and monitors for break-glass access |
 | `clusters[].enforcement (2)` | array | `['infrastructure_provisioning', 'configuration_management']` | — | Enforcement policies for this cluster |
 | `clusters[].cluster_type (2)` | string | — | `values: k8s, nomad, swarm, ecs` | Cluster type override |
 | `clusters[].drawio_icon (2)` | string | `mxgraph.kubernetes.kubernetes_cluster` | — | Draw.io icon for cluster visualization |
@@ -122,6 +125,13 @@ Type: `array`
 | `hosts[].ip_pool.start (3)` | string | — | `pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$` | Start of IAC-managed IP range |
 | `hosts[].ip_pool.end (3)` | string | — | `pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$` | End of IAC-managed IP range |
 | `hosts[].enforcement (2)` | array | — | — | Enforcement policies for this host |
+| `hosts[].immutable (2)` | boolean | `False` | — | When true, configuration management skips this host and monitors for break-glass access |
+| `hosts[].vm (2)` | object | — | — | VM configuration overrides for Terraform provisioning |
+| `hosts[].vm.vm_id (3)` | integer | — | `min: 100` | Proxmox VM ID for this host |
+| `hosts[].vm.cores (3)` | integer | — | `min: 1` | CPU cores override |
+| `hosts[].vm.memory_gb (3)` | integer | — | `min: 1` | Memory (GB) override |
+| `hosts[].vm.disk_gb (3)` | integer | — | `min: 1` | Disk size (GB) override |
+| `hosts[].vm.datastore (3)` | string | — | — | Datastore override |
 | `hosts[].connection (2)` | object | — | — | SSH connection details |
 | `hosts[].connection.host (3)` | string | — | `minLength: 1` | SSH connection hostname or IP |
 | `hosts[].connection.user (3)` | string | — | `minLength: 1` | SSH connection username |

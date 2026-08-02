@@ -1,8 +1,19 @@
-# Example infrastructure.yaml
-# Copy this file to infrastructure.yaml and customize for your environment.
+# ===========================================================================
+# Example infrastructure.yaml — template for a fresh environment.
+#
+# Copy this file to infrastructure.yaml and customize for your setup. Every
+# key here mirrors the real file (conf/infrastructure.yaml); the values are
+# placeholders. If you add a field to one, add it to both — the schema
+# (conf/infrastructure.schema.yaml) validates the real file against the
+# same field rules that drive Terraform + Ansible.
+# ===========================================================================
 
 name: my-infrastructure
 
+# ---------------------------------------------------------------------------
+# platform — repo-wide defaults: admin user/group, OIDC provider, version
+# pins, and the Proxmox node VMs are cloned from.
+# ---------------------------------------------------------------------------
 platform:
   admin:
     user: myuser
@@ -28,6 +39,10 @@ platform:
     linked_clone: false
     tls_self_signed: true
 
+# ---------------------------------------------------------------------------
+# defaults — the fallback VM sizing and network settings every cluster uses
+# unless a cluster overrides them.
+# ---------------------------------------------------------------------------
 defaults:
   cluster_type: k8s
   service_type: docker_compose
@@ -44,6 +59,10 @@ defaults:
     workers:
       plane_name: worker
 
+# ---------------------------------------------------------------------------
+# clusters — the k8s clusters Terraform provisions. VM names derive as
+# <cluster_type>-<name>-<plane>-<NN>; vm_id_start/end bound the VM ID range.
+# ---------------------------------------------------------------------------
 clusters:
   - name: mycluster
     enforcement:
@@ -59,6 +78,10 @@ clusters:
       vm_id_start: 9010
       vm_id_end: 9099
 
+# ---------------------------------------------------------------------------
+# hosts — standalone (non-cluster) hosts: connection info for Ansible,
+# services they run, and the DNS IP pool the IAC DNS workflow manages.
+# ---------------------------------------------------------------------------
 hosts:
   - name: docker
     enforcement:
@@ -81,6 +104,9 @@ hosts:
       host: 10.0.0.1
       user: ansible
 
+# ---------------------------------------------------------------------------
+# services — hosted apps and their exposed ports, used for DNS/port planning.
+# ---------------------------------------------------------------------------
 services:
   defaults:
     host: docker
