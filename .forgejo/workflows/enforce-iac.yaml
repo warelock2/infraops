@@ -1,3 +1,26 @@
+# ===========================================================================
+# enforce-iac.yaml — the main infrastructure reconciliation pipeline.
+#
+# Runs on every push to master and via manual dispatch. It walks the whole
+# IaC loop against the single source of truth (conf/infrastructure.yaml):
+#
+#   1. Validate the YAML against its JSON Schema (fail fast on typos).
+#   2. Terraform init/validate/plan — the plan's exit code (0/1/2) tells us
+#      if infra CHANGED (2 = real diff) and gates the apply below.
+#   3. Pre-apply housekeeping: drain k8s nodes no longer in the config, and
+#      ensure the NATS readiness consumer exists.
+#   4. Apply + wait for readiness (terraform-apply-with-readiness.sh):
+#      only the VMs this plan CREATES/REPLACES signal on NATS. The step
+#      outputs ready=true ONLY when every expected VM answered — the hard
+#      gate before Ansible config-management runs.
+#   5. Generate the Ansible inventory and run site.yaml (k8s-cluster plays).
+#
+# The many `if:` conditions on `steps.apply-wait.outputs.ready == 'true'`
+# are what guarantee Ansible never touches a half-booted VM.
+#
+# NOTE: the workflow runs inside the forgejo-runner's docker_dind daemon as
+# the ci-base image (see scripts/build-ci-base.sh). All steps are containers.
+# ===========================================================================
 name: Enforce Infrastructure as Code
 
 on:
@@ -128,6 +151,14 @@ jobs:
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
+      # ---------------------------------------------------------------------
+      # THE GATE. This step is the orchestrator: it plans (to a file so the
+      # script can inspect create/replace actions), applies, then blocks on
+      # the NATS readiness stream for exactly the VMs it created. Only when
+      # every expected VM has signalled does it emit ready=true. If a VM
+      # never answers, it's destroyed and the apply retried (MAX_RETRIES).
+      # The Ansible steps below are gated on ready == 'true'.
+      # ---------------------------------------------------------------------
       - name: Apply and Wait for Readiness (with retries)
         id: apply-wait
         if: github.ref == 'refs/heads/master'
@@ -141,6 +172,13 @@ jobs:
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
+      # ---------------------------------------------------------------------
+      # Config management only runs when the readiness gate passed. The
+      # inventory is generated from infrastructure.yaml, then site.yaml
+      # (k8s-cluster plays) configures the nodes over SSH with keys passed
+      # in via secrets. Because of the gate, the plays assume manageable
+      # hosts — no boot-polling, just configuration.
+      # ---------------------------------------------------------------------
       - name: Generate Ansible Inventory
         if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true' && steps.apply-wait.outputs.ready == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest

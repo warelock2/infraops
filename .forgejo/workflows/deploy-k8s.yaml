@@ -1,3 +1,17 @@
+# ===========================================================================
+# deploy-k8s.yaml — manual-only k8s deployment workflow.
+#
+# Unlike enforce-iac.yaml (which provisions VMs + waits for readiness), this
+# workflow is a lighter manual tool: triggered on demand via workflow_dispatch
+# and intended for pushing configuration to an EXISTING cluster. It skips the
+# NATS readiness handshake and the plan/apply loop entirely — it just:
+#   1. validates infrastructure.yaml, 2. generates the inventory from
+#   Terraform's ansible_inventory output, 3. runs the k8s-cluster playbook.
+#
+# NOTE: it uses third-party images (python:3.12-alpine, alpine/ansible) and
+# installs tools inside the step, so it is self-contained but slower than the
+# ci-base image used by enforce-iac.
+# ===========================================================================
 name: Deploy Kubernetes Cluster
 
 on:
