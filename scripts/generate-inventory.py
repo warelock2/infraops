@@ -30,6 +30,9 @@ def build_vm_name(cluster_type: str, cluster_name: str, plane_name: str, node_nu
 
 def generate_inventory(infra: dict, dns_domain: str) -> dict:
     """Generate Ansible inventory from infrastructure config."""
+    # Ansible inventory is a dict of GROUPS. The implicit "all" group holds
+    # every host; k8s_control / k8s_worker / docker_services are the groups
+    # the playbooks target. A host can be in "all" plus one or more groups.
     inventory = {
         "all": {"hosts": {}},
         "k8s_control": {"hosts": {}},
@@ -38,6 +41,8 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
     }
 
     # Process clusters
+    # Only clusters with infrastructure_provisioning in enforcement are real
+    # VMs Terraform builds (others are skipped — no inventory entries).
     clusters = infra.get("clusters", [])
     for cluster in clusters:
         cluster_name = cluster["name"]
@@ -68,6 +73,9 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
             inventory["k8s_worker"]["hosts"][name] = {}
 
         # Create per-cluster group with vars
+        # Ansible group vars (group_vars/k8s_<cluster>.*) could hold these,
+        # but putting them here as group vars keeps cluster-specific values
+        # (VIP, OIDC, API endpoint) glued to the hosts that use them.
         cluster_group_name = f"k8s_{cluster_name}"
         oidc_issuer_url = cluster.get("oidc_issuer_url", infra.get("platform", {}).get("kubernetes", {}).get("oidc_issuer_url"))
         cp_vip = cp_config.get("vip")
@@ -93,6 +101,9 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
         }
 
     # Process standalone hosts
+    # Non-cluster hosts (docker, firewall) get an ansible_host/ansible_user
+    # for SSH; only those opted into configuration_management join the
+    # docker_services group the plays target.
     hosts = infra.get("hosts", [])
     for host in hosts:
         name = host["name"]
