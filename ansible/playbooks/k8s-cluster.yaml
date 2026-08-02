@@ -4,25 +4,16 @@
   become: yes
   gather_facts: false
   tasks:
-    - name: Wait for cloud-init reboot to complete
-      ansible.builtin.command: test -f /var/run/have_not_yet_rebooted
-      register: flag_check
-      until: flag_check.rc != 0
-      retries: 60
-      delay: 10
-      failed_when: false
-      when: inventory_hostname is match('^k8s-.+-(?:control|worker)-\\d+$')
-
+    # Single run-wide connection gate. The readiness handshake has already
+    # proven created VMs are booted, past the cloud-init reboot, and sshd is
+    # up (see scripts/cloud-init-reboot.yaml.template); persistent hosts like
+    # docker_services are not Terraform-created and are always up. So this is
+    # just a cheap "every target answers SSH" check that also verifies the
+    # ansible SSH key authenticates, before any config work begins.
     - name: Wait for SSH
       ansible.builtin.wait_for_connection:
-        delay: 10
-        timeout: 600
-
-    - name: Wait for cloud-init to complete
-      ansible.builtin.command: cloud-init status --wait
-      changed_when: false
-      failed_when: false
-      timeout: 300
+        delay: 0
+        timeout: 120
 
     - name: Create admin user
       ansible.builtin.user:
@@ -60,11 +51,6 @@
   become: yes
   gather_facts: false
   tasks:
-    - name: Wait for SSH
-      ansible.builtin.wait_for_connection:
-        delay: 10
-        timeout: 180
-
     - name: Gather facts
       ansible.builtin.setup:
 
@@ -197,11 +183,6 @@
   become: yes
   gather_facts: false
   tasks:
-    - name: Wait for SSH
-      ansible.builtin.wait_for_connection:
-        delay: 5
-        timeout: 120
-
     - name: Get node IP address
       ansible.builtin.command:
         cmd: hostname -I
@@ -344,11 +325,6 @@
   vars:
     cp_leader: "{{ (groups['k8s_control'] | sort)[0] }}"
   tasks:
-    - name: Wait for SSH
-      ansible.builtin.wait_for_connection:
-        delay: 5
-        timeout: 120
-
     - name: Get node IP address
       ansible.builtin.command:
         cmd: hostname -I
@@ -494,11 +470,6 @@
   become: yes
   gather_facts: false
   tasks:
-    - name: Wait for SSH
-      ansible.builtin.wait_for_connection:
-        delay: 5
-        timeout: 120
-
     - name: Check if node already joined
       ansible.builtin.stat:
         path: /etc/kubernetes/kubelet.conf
