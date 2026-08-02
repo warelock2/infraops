@@ -5,8 +5,12 @@
 # ci-base (forgejo.afobl.com/warelock/ci-base:latest) is what every Forgejo
 # Actions workflow step runs in. It bundles the toolchain CI needs: terraform
 # (version pinned in conf/infrastructure.yaml), vault, nats CLI, kubectl, yq,
-# ansible-core + collections, python libs. This script rebuilds it (--no-cache
-# for reproducibility) and pushes it, so CI stays in sync with the config.
+# ansible-core + collections, python libs. This script rebuilds it and pushes
+# it, so CI stays in sync with the config.
+#
+# The Dockerfile is split into cached layers (base, pip, galaxy, binaries,
+# provider mirror) so rebuilds reuse unchanged layers; versions are pinned via
+# ARGs + the lock file, so caching does not hurt reproducibility.
 #
 # Docker credentials are handled via docker login; the config file is
 # shredded afterwards so tokens never persist on the build host.
@@ -31,8 +35,9 @@ docker login forgejo.afobl.com
 echo "Building $IMAGE from $DOCKERFILE..."
 # Build context is the repo root so the Dockerfile can COPY terraform/ (the
 # provider mirror is baked from terraform/.terraform.lock.hcl). .dockerignore
-# keeps the context to docker/ci-base/ + terraform/ only.
-docker build --no-cache --build-arg NATS_CLI_VERSION="$NATS_CLI_VERSION" -t "$IMAGE" -f "$DOCKERFILE" .
+# keeps the context to docker/ci-base/ + terraform/ only. No --no-cache: the
+# Dockerfile is split into cached layers so rebuilds reuse unchanged steps.
+docker build --build-arg NATS_CLI_VERSION="$NATS_CLI_VERSION" -t "$IMAGE" -f "$DOCKERFILE" .
 
 echo "Pushing $IMAGE..."
 docker push "$IMAGE"
