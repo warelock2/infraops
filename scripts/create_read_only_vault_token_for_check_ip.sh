@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
+# ===========================================================================
+# Create a scoped read-only Vault token for the IP-availability checker.
+#
+# Principle of least privilege: instead of a broad root/token, this writes a
+# narrow policy that only allows READING the pfSense/proxmox/nats paths under
+# secret/infraops/* (enough to check whether an IP is already allocated) and
+# mints a reusable, non-expiring token bound to that policy.
+#
+# The emitted token goes to stdout — capture it, don't log it.
+# ===========================================================================
 # create_read_only_vault_token_for_check_ip.sh
-# Creates a read-only policy scoped to secret/infraops/* and a reusable token
 
 set -euo pipefail
 

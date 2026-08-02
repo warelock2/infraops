@@ -1,4 +1,14 @@
 #!/bin/bash
+# ===========================================================================
+# Import a k8s cluster's admin context into the local kubeconfig.
+#
+# One-shot convenience: ssh to the cluster's first control-plane node
+# (k8s-<cluster>-control-01), pull /etc/kubernetes/admin.conf, rewrite the
+# server URL to the stable API DNS name (k8s-<cluster>-api.localdomain), and
+# merge it into ~/.kube/config. Installs kubectl on the fly if missing.
+#
+# Usage: k8s_import_context.sh <cluster_name>   (e.g. mushroom)
+# ===========================================================================
 set -e
 
 CLUSTER="${1}"

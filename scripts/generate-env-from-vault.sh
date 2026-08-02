@@ -1,6 +1,16 @@
 #!/bin/bash -e
-# Render env-example.txt template with values from Vault
-# Requires: vault CLI, VAULT_ADDR, VAULT_TOKEN (or pass tokens/vault-prod)
+# ===========================================================================
+# Render env-example.txt template with values from Vault.
+#
+# The repo stores env TEMPLATES, not secrets. This script substitutes every
+# {{VAULT:path:key}} token in the template with the live value from Vault
+# and writes the result to a 0600 output file. The output is meant to be
+# consumed once (e.g. rendered into a cloud-init snippet) and then shredded,
+# so it never persists with real secrets in the repo.
+#
+# Auth: $VAULT_TOKEN, or fall back to `pass tokens/vault-prod`.
+# Usage: generate-env-from-vault.sh [template] [output]
+# ===========================================================================
 
 set -euo pipefail
 

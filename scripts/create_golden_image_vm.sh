@@ -1,4 +1,14 @@
 #!/bin/bash -e
+# ===========================================================================
+# Build the golden Ubuntu VM image on Proxmox.
+#
+# Downloads a fresh Ubuntu cloud image, injects a cloud-init config (ssh
+# keys, qemu-guest-agent, NATS etc.), snapshots it into a VM template, and
+# registers it as TEMPLATE_VMID (8000). Every k8s VM Terraform creates is a
+# clone of this template, so keeping the golden image current is how new
+# nodes inherit the baseline tooling. Requires Proxmox API credentials and
+# must run on/against the Proxmox node (typically utopiaplanitia).
+# ===========================================================================
 set -x
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

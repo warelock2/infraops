@@ -1,4 +1,17 @@
 #!/bin/sh
+# ===========================================================================
+# Block until the readiness handshake for expected VMs completes.
+#
+# Called by the workflow AFTER terraform apply. It waits on the NATS stream:
+# each freshly-created VM publishes infraops.helloworld once it has booted,
+# run cloud-init, and validated hostname/IP/route/sshd. We consume one
+# message per expected VM; any VM that fails to signal within the timeout is
+# reported via FAILED_VMS (consumed by destroy-failed-vms.sh).
+#
+# EXPECTED_VMS may be provided by the caller (terraform-apply-with-readiness.sh
+# derives it from the Terraform plan — exactly the VMs being created/replaced).
+# Otherwise fall back to computing it from infrastructure.yaml.
+# ===========================================================================
 set -e
 
 export VAULT_ADDR="${VAULT_ADDR:-https://vault.afobl.com}"
@@ -15,9 +28,8 @@ nats context add iac-orchestrator \
   --server tls://midas.afobl.com:4222 \
   --user iac-orchestrator --password "$NATS_IAC_PASSWORD"
 
-# EXPECTED_VMS may be provided by the caller (terraform-apply-with-readiness.sh
-# derives it from the Terraform plan — exactly the VMs being created/replaced).
-# Otherwise fall back to computing it from infrastructure.yaml.
+# EXPECTED_VMS was described in the header above; here it's read into the
+# script's own variable (set -u safety) if the caller passed it.
 if [ -n "${EXPECTED_VMS:-}" ]; then
   echo "=== Using EXPECTED_VMS from caller ==="
 else

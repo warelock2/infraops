@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+# ===========================================================================
+# Build and push the ci-base Docker image to the Forgejo registry.
+#
+# ci-base (forgejo.afobl.com/warelock/ci-base:latest) is what every Forgejo
+# Actions workflow step runs in. It bundles the toolchain CI needs: terraform
+# (version pinned in conf/infrastructure.yaml), vault, nats CLI, kubectl, yq,
+# ansible-core + collections, python libs. This script rebuilds it (--no-cache
+# for reproducibility) and pushes it, so CI stays in sync with the config.
+#
+# Docker credentials are handled via docker login; the config file is
+# shredded afterwards so tokens never persist on the build host.
+# ===========================================================================
 set -euo pipefail
 
 IMAGE="forgejo.afobl.com/warelock/ci-base:latest"
