@@ -1,5 +1,26 @@
 #cloud-config
 
+# ===========================================================================
+# cloud-init snippet injected into every new VM (vendor data).
+#
+# This is the SOURCE OF THE READINESS CONTRACT. When Terraform clones a VM
+# it attaches this snippet (filled in by ansible/create-proxmox-snippet.sh,
+# which substitutes __NATS_VM_PASSWORD__). What happens:
+#
+#   1. runcmd fixes the netplan interface name to the real NIC, writes
+#      /etc/helloworld/hostinfo.txt (hostname/ip/vm_id from the system),
+#      then starts helloworld.service.
+#   2. helloworld.sh waits for cloud-init, validates hostname/IP/route/sshd/
+#      NATS (healing what it can), and ONLY THEN publishes
+#      infraops.helloworld on NATS.
+#   3. The CI orchestrator consumes that signal (wait-for-readiness.sh) and
+#      replies on the ack subject. On ack, the service self-destructs —
+#      the VM is now a normal machine Ansible can manage.
+#
+# Validation failures trigger a reboot (maybe_reboot) up to MAX_REBOOTS;
+# this is the "reboot dance" the Ansible plays no longer need to poll for.
+# ===========================================================================
+
 packages:
   - qemu-guest-agent
 
