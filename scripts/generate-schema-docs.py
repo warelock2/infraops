@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Generate SCHEMA_REFERENCE.md from infrastructure.schema.yaml."""
+"""Generate SCHEMA_REFERENCE.md from infrastructure.schema.yaml.
+
+Flattens the JSON Schema's nested properties (with path prefixes like
+clusters[].name) into a single markdown table per section, so the schema
+docs never drift from the schema itself. Regenerate with `viinfra --regen`.
+"""
 
 import sys
 import yaml
@@ -65,7 +70,11 @@ def collect_properties(schema_node, path_prefix=""):
 
 
 def calc_level(path):
-    """Calculate YAML indentation depth from path."""
+    """Calculate YAML indentation depth from path.
+
+    Each dot (or [] for arrays) is one nesting level, which drives the
+    indentation shown next to each property path in the reference doc.
+    """
     return path.count(".") + path.count("[]")
 
 

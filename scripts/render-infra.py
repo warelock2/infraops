@@ -2,6 +2,11 @@
 """
 Generate draw.io architecture diagrams from infrastructure.yaml.
 
+The "Generate Diagram" CI step runs this so the repo always has a visual
+of the declared topology. It turns the YAML (clusters -> planes -> VMs,
+hosts, services) into draw.io mxGraph XML with clusters as swimlane-style
+containers. Layout constants below (PADDING/NODE_W/...) are pixel tuning.
+
 Usage:
   python scripts/render-infra.py                                # Full diagram
   yq '.clusters[] | select(.name == "mushroom")' infrastructure.yaml | python scripts/render-infra.py
@@ -250,6 +255,9 @@ class Builder:
 
 
 def main():
+    # Optional CLI arg is a yq expression; with no arg we render the whole
+    # infrastructure.yaml. determine_shape picks the top-level kind
+    # (clusters vs services) which decides which builder methods run.
     expr = sys.argv[1] if len(sys.argv) > 1 else ""
     infra = load_yaml(INFRA_PATH)
     data = resolve_data(infra, expr)
@@ -263,6 +271,8 @@ def main():
     if kind == "clusters":
         end_y = builder.render_clusters(items)
         if not expr:
+            # Full-diagram mode: clusters first, then the standalone
+            # services below them (y-offset returned by render_clusters).
             services = flatten_instances(infra.get("services", {}).get("instances", {}))
             builder.render_services(services, end_y)
     elif kind == "services":
