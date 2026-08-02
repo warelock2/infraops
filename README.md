@@ -80,6 +80,24 @@ This infrastructure requires the following components in your environment:
 - **Forgejo** or GitHub — Git hosting with CI/CD runners
 - **pfSense REST API package** (`pfSense-pkg-RESTAPI`) — required for DNS automation via Ansible
 
+## Architecture Highlights
+
+| Feature | Description |
+|---------|-------------|
+| **Single Source of Truth** | `conf/infrastructure.yaml` drives Terraform, Ansible, inventory generation, and CI validation |
+| **Schema-Validated Config** | JSON Schema (`infrastructure.schema.yaml`) enforced in CI — typos fail fast |
+| **Multi-Tool Orchestration** | Clean handoff: Terraform (provision) → NATS stream (readiness) → Ansible (configure) |
+| **Message Queue Readiness Handshake** | VMs boot → cloud-init publishes to NATS → ack → self-destructs → Ansible gate passes |
+| **Self-Correcting VMs** | Hellworld/ack/self-destruct pattern guarantees every created VM signals readiness |
+| **Hard Readiness Gate** | Ansible never runs until every expected VM acknowledges |
+| **Drift Detection** | k8s drain playbook compares actual nodes to desired config; removes orphans automatically |
+| **Immutable-by-Default** | Config changes → Terraform recreates VMs (fresh cloud-init → new handshake) |
+| **Fully Offline CI Runtime** | Provider mirror baked into `ci-base` image; `terraform init` never hits registry during runs |
+| **Layered Docker Caching** | Split Dockerfile layers → 40min cold build, 10s warm rebuild; 11min → 2min pipeline |
+| **Flaky-Network Resilience** | Retry wrappers on all external downloads (build-time + CI init) |
+| **Multi-Stage Gate Pipeline** | Validate → Plan (exit code gates) → Apply+Wait → Inventory → Config Mgmt |
+| **Educational Inline Comments** | 6-tier comment system explaining *why* not just *what* across Terraform, Ansible, Config, Bash, Python, CI |
+
 ## Currently supported infrastructure components
 
 - **Ubuntu 26.04 LTS VMs** via Proxmox VE with cloud-init
@@ -89,3 +107,4 @@ This infrastructure requires the following components in your environment:
 - **MinIO** object storage (S3-compatible)
 - **HashiCorp Vault** secrets management
 - **pfSense Unbound DNS** service static IP management
+- **Locally cached Docker images** — CI base image bakes all Terraform providers, binaries, and collections; `terraform init` runs fully offline in CI
