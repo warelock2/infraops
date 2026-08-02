@@ -1,3 +1,12 @@
+# ===========================================================================
+# Input variables (TF_VAR_* or -var flags).
+#
+# Each variable defaults to null, which signals "no override given". The
+# locals in main.tf then coalesce: explicit variable wins, otherwise fall
+# back to the value in infrastructure.yaml. So this file is the "escape
+# hatch" — YAML is the default, variables are the emergency override.
+# ===========================================================================
+
 variable "proxmox_target_node" {
   description = "Proxmox node to create VMs on (defaults to infrastructure.yaml platform.proxmox.node)"
   type        = string
