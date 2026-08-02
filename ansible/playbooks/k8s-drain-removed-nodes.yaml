@@ -1,3 +1,12 @@
+# ===========================================================================
+# Drain and remove k8s nodes that are no longer in infrastructure.yaml.
+#
+# Drift correction for the cluster: computes the DESIRED node list from
+# infrastructure.yaml (same naming formula as Terraform), compares it to the
+# ACTUAL nodes kubeadm sees, and for any node that exists but shouldn't,
+# marks it unschedulable, drains workloads, then deletes the Node object.
+# This is what keeps the live cluster converged on the declared intent.
+# ===========================================================================
 ---
 - name: K8s Drain Removed Nodes
   hosts: localhost

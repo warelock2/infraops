@@ -1,3 +1,11 @@
+# ===========================================================================
+# One-off bootstrap: create the "ansible" user on freshly built VMs.
+#
+# New VMs boot with the cloud-init user (e.g. "ubuntu") and no password.
+# This play runs as that user over SSH, waits for connectivity, then creates
+# the ansible user with our public key so all subsequent plays can connect
+# as "ansible" (the default remote_user in ansible.cfg).
+# ===========================================================================
 - name: Bootstrap ansible user on new VMs
   hosts: k8s_control:k8s_worker
   remote_user: ubuntu
@@ -19,6 +27,8 @@
         group: ansible
         mode: "0700"
 
+    # copy (not authorized_key) so this works even without the ansible.posix
+    # collection on a bare image.
     - name: Copy public key to ansible user
       ansible.builtin.copy:
         src: ../files/ansible.pub

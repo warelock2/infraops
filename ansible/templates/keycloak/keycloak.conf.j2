@@ -1,3 +1,8 @@
+{# keycloak.conf.j2 — Keycloak server configuration.
+   Rendered by keycloak-deploy.yaml Play 2 and mounted read-only into the
+   container. Pins the external hostname, forces HTTPS-only, points at the
+   certs created by the play, and enables the health endpoints the deploy
+   play polls (uri retry on the OIDC well-known URL). #}
 hostname={{ kc_domain }}
 https-port={{ kc_container_port }}
 https-certificate-file=/etc/keycloak/certs/tls.crt

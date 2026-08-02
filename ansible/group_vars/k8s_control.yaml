@@ -1,2 +1,5 @@
+# Group vars for hosts in the k8s_control group (control plane nodes).
+# Tells the k8s playbook which "role" these hosts play. This is how the same
+# playbook branches its behavior based on which inventory group a host is in.
 ---
 k8s_node_type: k8s_control

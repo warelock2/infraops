@@ -1,3 +1,14 @@
+# ===========================================================================
+# Global Ansible variables (group_vars/all/main.yml)
+#
+# "all" is the implicit group every host belongs to, so these variables are
+# available to every play and every host. They are mostly *aliases*: the
+# real values are injected at runtime by CI as extra-vars (-e). Extra-vars
+# have the HIGHEST precedence in Ansible, so they always win over this file.
+#
+# Example: CI runs `ansible-playbook ... -e infra_platform_kubernetes_version=1.33.0`
+# and this file maps that into the shorter `k8s_version` used by the playbooks.
+# ===========================================================================
 ---
 ansible_python_interpreter: /usr/bin/python3
 
@@ -11,5 +22,7 @@ admin_user: "{{ infra_admin_user }}"
 admin_group: "{{ infra_admin_group }}"
 
 # pfSense API connection vars
+# Static network facts: the pfSense firewall/DNS host that manages host
+# overrides, and its API accepts self-signed certs (internal box).
 pfsense_api_host: 192.168.0.1
 pfsense_api_validate_certs: false

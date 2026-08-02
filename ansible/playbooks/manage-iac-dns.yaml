@@ -33,6 +33,14 @@
 #     -e "workflow=list" 2>/dev/null | \
 #     jq -r '.plays[].tasks[] | select(.task.name == "List — display pool hosts") | .hosts.localhost | select(.skipped != true) | .msg[]'
 
+# ---------------------------------------------------------------------------
+# Play 1 — Parse the workflow request and load infra/Vault context.
+#
+# All on localhost: parse the -e "workflow=..." string into a list of
+# {action, targets} steps (the Jinja block above normalizes separators),
+# validate the actions, then read infrastructure.yaml + the pfSense API key
+# from Vault. This play only sets up state for the second play to consume.
+# ---------------------------------------------------------------------------
 - name: Setup — read infrastructure and get API key
   hosts: localhost
   gather_facts: no
@@ -123,6 +131,14 @@
       ansible.builtin.set_fact:
         pfsense_api_key: "{{ vault_pfsense.secret.api_key }}"
 
+# ---------------------------------------------------------------------------
+# Play 2 — Apply the parsed steps to the pfSense DNS resolver.
+#
+# hostvars['localhost'][...] pulls the facts set in Play 1 (facts do not
+# survive between plays, but hostvars do). It lists current host overrides,
+# filters to those living in our IAC IP pool, then runs each workflow step
+# via tasks/run-step.yaml, which dispatches to add/delete/list task files.
+# ---------------------------------------------------------------------------
 - name: Manage DNS host overrides
   hosts: localhost
   gather_facts: no

@@ -1,3 +1,11 @@
+# ===========================================================================
+# Task file: add one DNS host override to the IAC pool on pfSense.
+#
+# Included from run-step.yaml in a loop, so `target_item` is set per iteration
+# (loop_var). Idempotent: skips if the host already exists. IP resolution
+# logic: use a caller-provided IP, otherwise allocate the first free IP from
+# the pool by rejecting already-used IPs.
+# ===========================================================================
 ---
 # Add a single DNS host override to the IAC pool.
 # Expects: target_item.hostname, target_item.domain
@@ -8,6 +16,12 @@
   ansible.builtin.set_fact:
     existing: "{{ pool_overrides | selectattr('host', 'equalto', target_item.hostname) | selectattr('domain', 'equalto', target_item.domain) | list }}"
 
+# ---------------------------------------------------------------------------
+# IP resolution: caller-provided IP wins, otherwise allocate the first free
+# IP from the pool (ip_list minus already-used IPs), and fail loudly if the
+# pool is exhausted. Each guard repeats `existing | length == 0` so a target
+# that already exists is skipped at every step (idempotent).
+# ---------------------------------------------------------------------------
 - name: Add — skip if target already exists
   ansible.builtin.debug:
     msg: "{{ target_item.hostname }}.{{ target_item.domain }} already exists in pool — skipping"

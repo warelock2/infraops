@@ -1,3 +1,11 @@
+# ===========================================================================
+# Ensure the pfSense REST API package/role is installed and configured.
+#
+# A localhost-only play: reads infrastructure.yaml (slurp + b64decode +
+# from_yaml), finds the docker host (for Vault URL) and the DNS server host
+# (the pfSense box), fetches the pfSense API key from Vault, then applies
+# the pfsense_api role against that host.
+# ===========================================================================
 ---
 - name: Ensure pfSense REST API is installed and configured
   hosts: localhost

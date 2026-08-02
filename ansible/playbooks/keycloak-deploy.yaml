@@ -1,3 +1,17 @@
+# ===========================================================================
+# Keycloak deployment playbook.
+#
+# Deploys a Keycloak identity provider as a Docker Compose project on the
+# docker_services host (the persistent infra host, never created by Terraform,
+# so no readiness dance here — it is assumed manageable).
+#
+# Two plays:
+#   1. Bootstrap the admin user (same idempotent user setup as the k8s play,
+#      run as the cloud-init/ansible user over SSH).
+#   2. Deploy Keycloak — but only the FIRST time (provision_mode gate).
+#      The play checks for an existing .env and ends early if found, so
+#      re-running it never wipes a live instance's config or data.
+# ===========================================================================
 ---
 - name: "Create admin user: {{ kc_project_name }}"
   hosts: docker_services
@@ -35,6 +49,15 @@
         mode: "0440"
         validate: "visudo -cf %s"
 
+# ---------------------------------------------------------------------------
+# Play 2 — Deploy Keycloak (first-time only).
+#
+# Connect as the admin user created above (remote_user override) and bring up
+# Keycloak under Docker Compose. The .env existence check makes this play a
+# one-shot bootstrap: existing instances are left untouched and the play ends
+# via meta: end_play. provision_mode=true + a bootstrap password are required
+# for a genuine first deployment, which prevents accidental re-provisioning.
+# ---------------------------------------------------------------------------
 - name: "Deploy Keycloak: {{ kc_project_name }}"
   hosts: docker_services
   become: yes
@@ -152,6 +175,9 @@
       register: compose_result
       changed_when: compose_result.stdout is search('Started|Created|Starting')
 
+    # NOT a VM-readiness wait: this polls the Keycloak container's HTTP API
+    # until it serves requests. Containers take time to pull and boot even on
+    # a manageable host, so this retry is about the application, not SSH.
     - name: Wait for Keycloak to be ready
       ansible.builtin.uri:
         url: "https://{{ kc_domain }}:{{ kc_host_port }}/realms/master/.well-known/openid-configuration"

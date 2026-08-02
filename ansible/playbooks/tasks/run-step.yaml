@@ -1,6 +1,12 @@
 ---
 # Dispatch a single workflow step (add/delete/list).
 # Expects: step.action, step.targets (list of {hostname, domain[, ip]})
+#
+# This is the dispatcher for manage-iac-dns.yaml: it fans one parsed step
+# out to the real logic. Each branch is guarded by a when: on step.action,
+# so only the relevant tasks run. add/delete loop over step.targets via
+# include_tasks (loop_var=target_item) so the *_host.yaml files see one
+# target at a time.
 
 # ── LIST ──────────────────────────────────────────────
 

@@ -1,4 +1,26 @@
 ---
+# ===========================================================================
+# K8s cluster lifecycle playbook.
+#
+# Runs against the inventory generated from infrastructure.yaml
+# (ansible/inventory.json via scripts/generate-inventory.py). The inventory
+# groups are: k8s_control, k8s_worker, docker_services.
+#
+# Execution order matters:
+#   1. Bootstrap an admin user on every node (so later plays can connect as
+#      that user instead of the default cloud-init user).
+#   2. Configure every node's base OS for k8s (kernel modules, sysctl,
+#      containerd, the k8s apt repo and pinned binaries).
+#   3. Set up keepalived + haproxy on control plane nodes so the API server
+#      is reachable at one virtual IP (VIP) even if a control node dies.
+#   4. Register the cluster API DNS name (k8s-<cluster>-api) on pfSense.
+#   5. Initialize the control plane (kubeadm init on the leader, join for
+#      the rest), install Calico CNI, and publish join commands via hostvars.
+#   6. Join the workers using the command the leader generated.
+#   7. Apply RBAC so OIDC groups can act on the cluster.
+#
+# Play 1 — "become: yes" elevates to root for every task in this play.
+# ---------------------------------------------------------------------------
 - name: "Create admin user on all nodes"
   hosts: k8s_control:k8s_worker:docker_services
   become: yes
@@ -46,6 +68,15 @@
         mode: "0440"
         validate: "visudo -cf %s"
 
+# ---------------------------------------------------------------------------
+# Play 2 — Base OS preparation on every k8s node.
+#
+# Kernel prerequisites: overlay + br_netfilter modules (needed for the CNI
+# network), sysctl for IPv4 forwarding and bridge traffic filtering.
+# Then the container runtime (containerd with SystemdCgroup), the pinned
+# k8s apt repository, and the exact kubelet/kubeadm/kubectl version held in
+# place so apt never auto-upgrades them mid-cluster.
+# ---------------------------------------------------------------------------
 - name: K8s common setup
   hosts: k8s_control:k8s_worker
   become: yes
@@ -54,6 +85,8 @@
     - name: Gather facts
       ansible.builtin.setup:
 
+    # Load the kernel modules immediately (modprobe) AND persist them in
+    # /etc/modules-load.d so they survive a reboot.
     - name: Load kernel modules for k8s
       community.general.modprobe:
         name: "{{ item }}"
@@ -178,11 +211,23 @@
         mode: "0644"
       when: inventory_hostname in groups['k8s_control']
 
+# ---------------------------------------------------------------------------
+# Play 3 — High-availability API endpoint.
+#
+# keepalived runs the Virtual Router Redundancy Protocol (VRRP): it assigns
+# the VIP to one control node and fails it over to another if the holder
+# dies. haproxy load-balances TLS to the kube-apiserver on all control nodes.
+# Together they give workers a single stable address (the VIP) for the API.
+# Templates are rendered from ansible/templates/*.j2 and notify their
+# respective handlers to restart on change.
+# ---------------------------------------------------------------------------
 - name: K8s control plane load balancer (keepalived + haproxy)
   hosts: k8s_control
   become: yes
   gather_facts: false
   tasks:
+    # Capture the node's primary IP and default interface so the templates
+    # can bind VRRP and haproxy to the right addresses per node.
     - name: Get node IP address
       ansible.builtin.command:
         cmd: hostname -I
@@ -245,11 +290,23 @@
         name: haproxy
         state: restarted
 
+# ---------------------------------------------------------------------------
+# Play 4 — Register the cluster API DNS name on pfSense.
+#
+# "hosts: localhost / connection: local" runs entirely on the control node
+# running Ansible (no remote target). It reads infrastructure.yaml via
+# slurp+b64decode+from_yaml, finds the DNS-capable host, fetches the pfSense
+# API key from Vault, and creates the host override "k8s-<cluster>-api"
+# pointing at the cluster VIP. The same workflow is reused for VM DNS
+# pre-registration (see terraform/main.tf terraform_data.dns_alloc).
+# ---------------------------------------------------------------------------
 - name: Create API DNS entry for cluster endpoint
   hosts: localhost
   gather_facts: no
   connection: local
   vars:
+    # Derive the cluster name from the first control node's VM name
+    # (e.g. k8s-mushroom-control-01 -> mushroom).
     _cluster_name: "{{ groups['k8s_control'][0] | regex_replace('^k8s-(.+)-(?:control|worker)-\\d+$', '\\1') }}"
   tasks:
     - name: Read infrastructure.yaml
@@ -317,6 +374,18 @@
           domain: "{{ _dns_domain }}"
           ip: "{{ _cluster.control_plane.vip }}"
 
+# ---------------------------------------------------------------------------
+# Play 5 — Initialize the control plane.
+#
+# "serial: 1" runs this play ONE host at a time, so the leader fully
+# initializes (and publishes join commands to hostvars) before the next
+# control node tries to join. cp_leader = the first (alphabetically) control
+# node; it runs "kubeadm init --upload-certs", everyone else joins.
+#
+# Facts shared between hosts: set_fact on the leader is readable by workers
+# via hostvars[cp_leader]. The admin kubeconfig, join token, certificate key
+# and Calico manifest are all produced here and consumed in Play 6.
+# ---------------------------------------------------------------------------
 - name: K8s control plane init
   hosts: k8s_control
   become: yes
@@ -465,6 +534,14 @@
         k8s_cp_join_command: "kubeadm join {{ cp_endpoint }} --token {{ join_command.stdout | regex_search('(?<=--token )[^ ]+') }} --discovery-token-ca-cert-hash {{ join_command.stdout | regex_search('(?<=--discovery-token-ca-cert-hash )[^ ]+') }} --control-plane --certificate-key {{ cert_key_raw.stdout | regex_search('[a-f0-9]{64}') }}"
       when: inventory_hostname == cp_leader
 
+# ---------------------------------------------------------------------------
+# Play 6 — Join workers.
+#
+# Each worker reads the join command the leader stored in hostvars and runs
+# it. kubelet.conf existing means the node already joined (stat check) so the
+# play is idempotent. Workers also get the admin kubeconfig copied from the
+# leader so the admin user can manage the cluster from any node.
+# ---------------------------------------------------------------------------
 - name: K8s workers join
   hosts: k8s_worker
   become: yes
@@ -502,6 +579,15 @@
           chown "{{ infra_admin_user }}:{{ infra_admin_group }}" "/home/{{ infra_admin_user }}/.kube/config"
           chmod 0600 "/home/{{ infra_admin_user }}/.kube/config"
 
+# ---------------------------------------------------------------------------
+# Play 7 — RBAC.
+#
+# Maps OIDC identity groups (configured in Keycloak) to Kubernetes roles.
+# cluster-admin binds the k8s-admins and <cluster>-admins groups to full
+# control; <cluster>-viewers is bound to the read-only "view" role. The
+# kubectl wait first blocks until every node reports Ready, so RBAC applies
+# to a fully formed cluster.
+# ---------------------------------------------------------------------------
 - name: K8s RBAC
   hosts: k8s_control
   become: yes

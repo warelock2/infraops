@@ -1,3 +1,9 @@
+{# keepalived.conf.j2 — VRRP config for the control-plane virtual IP.
+   Rendered per-node by k8s-cluster.yaml Play 3.
+   priority is derived from the node's alphabetical position in the group,
+   so the leader (index 0) gets the highest priority and owns the VIP.
+   unicast_peer lists every OTHER control node, so VRRP health traffic flows
+   without multicast. nopreempt keeps the VIP stable across failovers. #}
 global_defs {
   router_id {{ inventory_hostname }}
 }
