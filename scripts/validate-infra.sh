@@ -1,4 +1,12 @@
 #!/bin/bash
+# ===========================================================================
+# Validate conf/infrastructure.yaml against its JSON Schema.
+#
+# The CI pipeline runs check-jsonschema directly (enforce-iac.yaml); this
+# script is the same check as a standalone CLI. It ensures every field the
+# Terraform/Ansible tooling reads exists and has the right type/shape BEFORE
+# any provisioning starts. check-jsonschema is installed on demand.
+# ===========================================================================
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

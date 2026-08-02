@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
+# ===========================================================================
+# Configure local kubectl for OIDC auth against a Keycloak-protected cluster.
+#
+# The k8s cluster's API server validates Keycloak tokens (kubeadm-config
+# wires oidc-* flags). This script sets up the LOCAL side: installs kubectl/
+# kubelogin/kubectx if missing, resolves the API server + cluster CA, installs
+# the Keycloak OIDC CA for token verification, and writes kubeconfig entries
+# so `kubectl` transparently runs the OIDC device/pkce flow when you login.
+#
+# Usage: k8s-oidc-client-setup.sh <cluster_name> [--server=<url>] [--ca-file=<path>]
+# ===========================================================================
 set -euo pipefail
-
-# k8s-oidc-client-setup.sh
-# Sets up kubectl OIDC authentication against a Keycloak-protected Kubernetes cluster.
-# Installs kubectl, kubelogin, kubectx if missing. Configures kubeconfig with OIDC context.
 
 # --- Defaults ---
 OIDC_SERVER_NAME="keycloak.afobl.com"

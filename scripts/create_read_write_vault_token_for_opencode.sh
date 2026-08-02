@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
+# ===========================================================================
+# Create a scoped read/write Vault token for opencode automation.
+#
+# Same pattern as the read-only variant, but grants create/read/update/delete
+# on everything under secret/infraops/* — the level the automation agent
+# needs to manage infra secrets. The policy is still scoped to the infraops
+# prefix so a leaked token can't reach other Vault paths.
+#
+# The emitted token goes to stdout — capture it, don't log it.
+# ===========================================================================
 # create_read_write_vault_token_for_opencode.sh
-# Creates an infraops-rw policy and a reusable token restricted to secret/infraops/*
 
 set -euo pipefail
 

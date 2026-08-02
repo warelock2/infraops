@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+# ===========================================================================
+# Fetch a kubeconfig from a cluster node and merge it into the local config.
+#
+# scp's ~/.kube/config off a node (usually the control-plane leader) and
+# either adopts it (no local config yet) or flattens it into the existing
+# local config. Derives a context name from the remote config by default,
+# renames the context if a different name was requested, then activates it.
+#
+# Usage: install-kubeconfig.sh <user@host> [context-name]
+# ===========================================================================
 set -euo pipefail
 
 CLUSTER_NODE="${1:?Usage: $0 <user@host> [context-name]}"

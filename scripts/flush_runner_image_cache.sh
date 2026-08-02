@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+# ===========================================================================
 # Flush the forgejo-runner's dind image cache.
-# Run on the host that runs the docker daemon (spacedock).
+#
+# Forgejo Actions runners build in a Docker-in-Docker daemon (container
+# docker_dind). Cached images can go stale between runs, so this prunes them
+# and lets the next job re-pull fresh ones. Run ON THE HOST that owns the
+# docker_dind container (spacedock), not inside a workflow.
+# ===========================================================================
 set -euo pipefail
 
 echo "Pruning unused images from docker_dind..."
