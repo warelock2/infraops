@@ -46,6 +46,7 @@ RUN apk add --no-cache curl unzip jq python3 py3-pip py3-requests py3-yaml wget 
     test -f /opt/tf-provider-mirror/registry.terraform.io/hashicorp/vault/index.json || \
       { echo "ERROR: provider mirror failed to build"; exit 1; } && \
     printf 'provider_installation {\n  filesystem_mirror {\n    path = "/opt/tf-provider-mirror"\n  }\n}\n' > /root/.terraformrc && \
+    cd / && \
     rm -rf /opt/tf-provider-src && \
     # --- ansible-core (core only, no bundled collections) ---
     pip3 install --break-system-packages --no-cache-dir ansible-core && \
