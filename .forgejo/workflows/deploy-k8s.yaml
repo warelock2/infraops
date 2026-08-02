@@ -8,9 +8,10 @@
 #   1. validates infrastructure.yaml, 2. generates the inventory from
 #   Terraform's ansible_inventory output, 3. runs the k8s-cluster playbook.
 #
-# NOTE: it uses third-party images (python:3.12-alpine, alpine/ansible) and
-# installs tools inside the step, so it is self-contained but slower than the
-# ci-base image used by enforce-iac.
+# All steps run in the ci-base image (forgejo.afobl.com/warelock/ci-base),
+# which already bundles the toolchain: terraform (version pinned in
+# conf/infrastructure.yaml), yq, check-jsonschema, hvac, ansible-core, and
+# the ansible collections. Nothing is installed inside the steps.
 # ===========================================================================
 name: Deploy Kubernetes Cluster
 
@@ -25,29 +26,17 @@ jobs:
         uses: https://code.forgejo.org/actions/checkout@v4
 
       - name: Validate Infrastructure YAML
-        uses: docker://python:3.12-alpine
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c "apk add -q wget &&
-            wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&
-            chmod 755 /usr/local/bin/yq &&
-            yq -V | grep -q mikefarah &&
-            pip install -q --root-user-action=ignore check-jsonschema &&
-            check-jsonschema --schemafile conf/infrastructure.schema.yaml
+            sh -c "check-jsonschema --schemafile conf/infrastructure.schema.yaml
             conf/infrastructure.yaml"
 
       - name: Terraform Init and Generate Inventory
-        uses: docker://alpine/ansible:latest
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c "apk add --no-cache -q curl unzip wget &&
-            wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&
-            chmod 755 /usr/local/bin/yq &&
-            yq -V | grep -q mikefarah &&
-            TF_VERSION=$(yq .platform.terraform.version conf/infrastructure.yaml) &&
-            curl -sL https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/terraform.zip &&
-            unzip -oq /tmp/terraform.zip -d /usr/local/bin/ &&
-            cd terraform &&
+            sh -c "cd terraform &&
             sh ../scripts/terraform-init-retry.sh init -reconfigure &&
             terraform output -json ansible_inventory > ../ansible/inventory.json"
         env:
@@ -55,18 +44,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
 
       - name: Run K8s Cluster Playbook
-        uses: docker://alpine/ansible:latest
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c 'apk add -q wget py3-pip &&
-            wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq &&
-            chmod 755 /usr/local/bin/yq &&
-            yq -V | grep -q mikefarah &&
-            pip3 install -q --break-system-packages --root-user-action=ignore hvac &&
-            ansible-galaxy collection install
-            kubernetes.core community.general ansible.posix
-            community.hashi_vault pfrest.pfsense --force &&
-            if [ -z "$ADMIN_SSH_PUBLIC_KEY" ]; then echo "ERROR: ADMIN_SSH_PUBLIC_KEY not set" && exit 1; fi &&
+            sh -c 'if [ -z "$ADMIN_SSH_PUBLIC_KEY" ]; then echo "ERROR: ADMIN_SSH_PUBLIC_KEY not set" && exit 1; fi &&
             if [ -z "$ANSIBLE_SSH_PRIVATE_KEY" ]; then echo "ERROR: ANSIBLE_SSH_PRIVATE_KEY not set" && exit 1; fi &&
             echo "$ADMIN_SSH_PUBLIC_KEY" > /tmp/ssh_key.pub &&
             echo "$ANSIBLE_SSH_PRIVATE_KEY" > /tmp/ansible_key &&
