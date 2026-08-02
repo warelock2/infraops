@@ -1,0 +1,14 @@
+# Keep the ci-base build context (repo root) lean. Only docker/ci-base/ and
+# terraform/ are needed to build the image.
+.git
+.gitignore
+githooks
+docs
+conf
+ansible
+modules
+scripts
+*.md
+*.tfvars
+.env
+**/__pycache__
