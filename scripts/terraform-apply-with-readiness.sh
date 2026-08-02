@@ -6,47 +6,56 @@ export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-true}"
 
 MAX_RETRIES=3
 READINESS_TIMEOUT=1200
+PLAN_FILE=/tmp/tfplan
+FAILED_VMS_FILE=/tmp/failed_vms.txt
 
-echo "=== Computing expected VMs ==="
-EXPECTED_VMS=""
-CLUSTER_COUNT=$(yq ".clusters | length" conf/infrastructure.yaml)
-for i in $(seq 0 $((CLUSTER_COUNT - 1))); do
-  CLUSTER_NAME=$(yq ".clusters[$i].name" conf/infrastructure.yaml)
-  CLUSTER_TYPE=$(yq ".clusters[$i].cluster_type // .defaults.cluster_type" conf/infrastructure.yaml)
-  CP_NODES=$(yq ".clusters[$i].control_plane.nodes // 0" conf/infrastructure.yaml)
-  WORKER_NODES=$(yq ".clusters[$i].workers.nodes // 0" conf/infrastructure.yaml)
-  CP_PLANE_NAME=$(yq ".clusters[$i].plane_defaults.control_plane.plane_name // .defaults.planes.control_plane.plane_name" conf/infrastructure.yaml)
-  WORKER_PLANE_NAME=$(yq ".clusters[$i].plane_defaults.workers.plane_name // .defaults.planes.workers.plane_name" conf/infrastructure.yaml)
-  CP_VM_ID_START=$(yq ".clusters[$i].control_plane.vm_id_start" conf/infrastructure.yaml)
-  WORKER_VM_ID_START=$(yq ".clusters[$i].workers.vm_id_start" conf/infrastructure.yaml)
-  for n in $(seq 1 $CP_NODES); do
-    NUM=$(printf "%02d" $n)
-    HOSTNAME="${CLUSTER_TYPE}-${CLUSTER_NAME}-${CP_PLANE_NAME}-${NUM}"
-    VMID=$((CP_VM_ID_START + n - 1))
-    EXPECTED_VMS="${EXPECTED_VMS}${HOSTNAME}:${VMID} "
-  done
-  for n in $(seq 1 $WORKER_NODES); do
-    NUM=$(printf "%02d" $n)
-    HOSTNAME="${CLUSTER_TYPE}-${CLUSTER_NAME}-${WORKER_PLANE_NAME}-${NUM}"
-    VMID=$((WORKER_VM_ID_START + n - 1))
-    EXPECTED_VMS="${EXPECTED_VMS}${HOSTNAME}:${VMID} "
-  done
-done
+# ---------------------------------------------------------------------------
+# Extract VMs that Terraform will create or replace from the plan.
+#
+# Terraform is the authority on what it will create: a "create" or
+# "delete,create" (replacement) action means the VM boots fresh from a clone,
+# runs cloud-init, and signals readiness via NATS. In-place "update" and
+# "no-op" VMs never signal (their helloworld service already self-destructed).
+#
+# Output: one "hostname:vmid" pair per line.
+# ---------------------------------------------------------------------------
+extract_created_vms() {
+  terraform -chdir=terraform show -json "$PLAN_FILE" | jq -r '
+    [.resource_changes[]
+     | select(.type == "proxmox_virtual_environment_vm")
+     | select(.change.actions | index("create"))
+     | [((.index.key // .name)), ((.change.after.vm_id // .change.before.vm_id) | tostring)]
+     | join(":")] | .[]'
+}
 
-echo "Expected VMs: $EXPECTED_VMS"
+for RETRY in $(seq 1 "$MAX_RETRIES"); do
+  echo "=== Attempt $RETRY/$MAX_RETRIES ==="
 
-for RETRY in $(seq 1 $MAX_RETRIES); do
-  echo "=== Readiness attempt $RETRY/$MAX_RETRIES ==="
-
-  if [ $RETRY -eq 1 ]; then
-    terraform -chdir=terraform apply -auto-approve -no-color -input=false -parallelism=1
-  else
+  if [ "$RETRY" -gt 1 ]; then
     terraform -chdir=terraform init -reconfigure
-    terraform -chdir=terraform apply -auto-approve -no-color -input=false -parallelism=1
   fi
 
-  echo "=== Polling for readiness (1200s) ==="
-  if scripts/wait-for-readiness.sh 1200; then
+  # Plan to a file so we can inspect exactly what will be created
+  terraform -chdir=terraform plan -out="$PLAN_FILE" -no-color -input=false -parallelism=1
+
+  # The VMs Terraform creates/replaces are the ones that will signal readiness
+  EXPECTED_VMS=$(extract_created_vms | tr '\n' ' ')
+  echo "VMs to create/replace: $EXPECTED_VMS"
+
+  # Apply the exact plan we inspected
+  terraform -chdir=terraform apply "$PLAN_FILE"
+
+  # If nothing was created or replaced, no VM will signal — nothing to wait for
+  if [ -z "$EXPECTED_VMS" ]; then
+    echo "=== NO NEW VMs - skipping readiness wait ==="
+    echo "ready=true" >> "$GITHUB_OUTPUT"
+    echo "failed_vms=" >> "$GITHUB_OUTPUT"
+    exit 0
+  fi
+
+  echo "=== Polling for readiness (${READINESS_TIMEOUT}s) ==="
+  rm -f "$FAILED_VMS_FILE"
+  if EXPECTED_VMS="$EXPECTED_VMS" scripts/wait-for-readiness.sh "$READINESS_TIMEOUT"; then
     echo "=== ALL VMs READY ==="
     echo "ready=true" >> "$GITHUB_OUTPUT"
     echo "failed_vms=" >> "$GITHUB_OUTPUT"
@@ -54,18 +63,17 @@ for RETRY in $(seq 1 $MAX_RETRIES); do
   fi
 
   echo "=== Readiness timeout - destroying failed VMs ==="
-  FAILED_VMS=$(cat /tmp/failed_vms.txt 2>/dev/null || echo "")
-  if [ -z "$FAILED_VMS" ]; then
-    FAILED_VMS=$(grep '^failed_vms=' /tmp/wait-output.txt 2>/dev/null | cut -d= -f2- || echo "")
-  fi
+  FAILED_VMS=$(cat "$FAILED_VMS_FILE" 2>/dev/null || echo "")
 
   for entry in $FAILED_VMS; do
     HOSTNAME="${entry%%:*}"
     VMID="${entry##*:}"
     echo "Destroying failed VM: $HOSTNAME (VMID $VMID)"
-    
+
+    # Remove from state (try cluster and standalone resource addresses)
     terraform -chdir=terraform state rm "proxmox_virtual_environment_vm.vm[\"$HOSTNAME\"]" 2>/dev/null || true
-    
+    terraform -chdir=terraform state rm "proxmox_virtual_environment_vm.standalone[\"$HOSTNAME\"]" 2>/dev/null || true
+
     echo "Deleting VM $HOSTNAME via Proxmox API..."
     PROXMOX_NODE=$(yq ".platform.proxmox.node" conf/infrastructure.yaml)
     curl -k -sS -f -X DELETE \
