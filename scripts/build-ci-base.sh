@@ -29,7 +29,10 @@ echo "NATS CLI version: $NATS_CLI_VERSION"
 docker login forgejo.afobl.com
 
 echo "Building $IMAGE from $DOCKERFILE..."
-docker build --no-cache --build-arg NATS_CLI_VERSION="$NATS_CLI_VERSION" -t "$IMAGE" -f "$DOCKERFILE" docker/ci-base/
+# Build context is the repo root so the Dockerfile can COPY terraform/ (the
+# provider mirror is baked from terraform/.terraform.lock.hcl). .dockerignore
+# keeps the context to docker/ci-base/ + terraform/ only.
+docker build --no-cache --build-arg NATS_CLI_VERSION="$NATS_CLI_VERSION" -t "$IMAGE" -f "$DOCKERFILE" .
 
 echo "Pushing $IMAGE..."
 docker push "$IMAGE"
