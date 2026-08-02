@@ -15,9 +15,15 @@ nats context add iac-orchestrator \
   --server tls://midas.afobl.com:4222 \
   --user iac-orchestrator --password "$NATS_IAC_PASSWORD"
 
-echo "=== Computing expected VMs ==="
-EXPECTED_VMS=""
-CLUSTER_COUNT=$(yq ".clusters | length" conf/infrastructure.yaml)
+# EXPECTED_VMS may be provided by the caller (terraform-apply-with-readiness.sh
+# derives it from the Terraform plan — exactly the VMs being created/replaced).
+# Otherwise fall back to computing it from infrastructure.yaml.
+if [ -n "${EXPECTED_VMS:-}" ]; then
+  echo "=== Using EXPECTED_VMS from caller ==="
+else
+  echo "=== Computing expected VMs ==="
+  EXPECTED_VMS=""
+  CLUSTER_COUNT=$(yq ".clusters | length" conf/infrastructure.yaml)
 for i in $(seq 0 $((CLUSTER_COUNT - 1))); do
   CLUSTER_NAME=$(yq ".clusters[$i].name" conf/infrastructure.yaml)
   CLUSTER_TYPE=$(yq ".clusters[$i].cluster_type // .defaults.cluster_type" conf/infrastructure.yaml)
@@ -40,6 +46,7 @@ for i in $(seq 0 $((CLUSTER_COUNT - 1))); do
     EXPECTED_VMS="${EXPECTED_VMS}${HOSTNAME}:${VMID} "
   done
 done
+fi
 
 echo "Expected VMs: $EXPECTED_VMS"
 TOTAL=$(echo "$EXPECTED_VMS" | wc -w)
@@ -67,13 +74,14 @@ while true; do
     echo "RAW MSG: $MSG"
     HOSTNAME=$(echo "$MSG" | jq -r '.hostname // empty' 2>/dev/null || true)
     echo "PARSED HOSTNAME: '$HOSTNAME'"
-    if [ -n "$HOSTNAME" ] && echo "$READY_VMS" | grep -q "$HOSTNAME"; then
-      continue
-    fi
     if [ -n "$HOSTNAME" ]; then
-      echo "READY: $HOSTNAME"
-      READY_VMS="$READY_VMS $HOSTNAME"
+      # Always ack so the VM's helloworld.service can self-destruct — even if
+      # this VM isn't in our wait set (e.g. a modified-but-rebooted existing VM).
       nats pub "infraops.helloworld.ack.$HOSTNAME" '{"ack":true}' --context=iac-orchestrator
+      if ! echo "$READY_VMS" | grep -qw "$HOSTNAME"; then
+        echo "READY: $HOSTNAME"
+        READY_VMS="$READY_VMS $HOSTNAME"
+      fi
     fi
   done || true
 
@@ -116,4 +124,5 @@ for entry in $EXPECTED_VMS; do
   fi
 done
 echo "failed_vms=$FAILED_VMS" >> "$GITHUB_OUTPUT"
+echo "$FAILED_VMS" > /tmp/failed_vms.txt
 exit 1
