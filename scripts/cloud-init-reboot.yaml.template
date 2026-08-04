@@ -200,14 +200,25 @@ write_files:
       wait_for_cloud_init || exit 1
       read_auth_facts
 
+      validation_ok=0
       for attempt in $(seq 1 $MAX_ATTEMPTS); do
         log "validation attempt $attempt/$MAX_ATTEMPTS"
         if validate_and_heal; then
           log "validation passed"
+          validation_ok=1
           break
         fi
         sleep 2
       done
+
+      # Validation failures are supposed to trigger a reboot (see header
+      # comment) so a fresh cloud-init pass can re-apply the network config.
+      # Previously this fell through to the readiness loop regardless of the
+      # validation result, publishing readiness with a wrong IP.
+      if [ "$validation_ok" -ne 1 ]; then
+        log "validation failed after $MAX_ATTEMPTS attempts - cannot proceed, rebooting"
+        maybe_reboot
+      fi
 
       while true; do
         if wait_for_ack; then
@@ -247,6 +258,24 @@ write_files:
         "windows_ca_certs_match": null
       }
     permissions: "0600"
+
+  # Per-boot netplan interface-name fix. The bpg/proxmox provider seeds the
+  # cloud-init network config with a hardcoded interface name of "eth0", but
+  # Ubuntu's predictable interface naming (ens18) renames the NIC, so the
+  # static IP never binds after the first boot. The once-per-instance runcmd
+  # below fixes first boot; this script runs on EVERY boot (cloud-init final
+  # stage) so the fix survives the netplan re-render cloud-init does on each
+  # subsequent boot. Standardizes on the real interface (ens18) instead of
+  # fighting predictable naming.
+  - path: /var/lib/cloud/scripts/per-boot/00-fix-netplan.sh
+    content: |
+      #!/bin/bash
+      ACTUAL_IF=$(ip route show default | awk '{print $5}' | head -1)
+      sed -i "s/eth0/$ACTUAL_IF/g" /etc/netplan/50-cloud-init.yaml
+      sed -i '/match:/,+1d' /etc/netplan/50-cloud-init.yaml
+      sed -i '/set-name:/d' /etc/netplan/50-cloud-init.yaml
+      netplan apply
+    permissions: "0755"
 
 bootcmd:
   - swapoff -a
