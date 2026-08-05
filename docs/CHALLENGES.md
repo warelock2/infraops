@@ -45,3 +45,7 @@ Writing Vault tokens to `~/.vault-token` means secrets on disk. CI needs tokens 
 ## DNS resolver changes need explicit apply
 
 Creating or deleting host overrides via pfSense REST API stages changes but doesn't commit them. Unbound continues serving old records. **Solution:** Must call `pfrest.pfsense.services_dns_resolver_apply` after every create/delete operation to commit changes.
+
+## Ubuntu phased updates look like a patching failure
+
+Right after a fresh patch run, `apt list --upgradable` can show 10-20+ "available" packages (`apparmor`, `bind9`, `systemd`, `udev`, `grub-pc`, `cloud-init`, ...) even though `apt-get upgrade` reported nothing to do. This is not a failed patch and not a stale cache — Canonical publishes SRUs as **phased updates** (e.g. `(phased 10%)`), rolling them out to a small cohort first. `apt-get upgrade` correctly defers them (`The following upgrades have been deferred due to phasing: ...`) until the phase window opens for the machine, which is keyed off the apt cache `update-success-stamp` age. Running `apt update` re-stamps the cache and can make them show up as upgradable, and a later run installs them. **Solution:** Verify with `apt-get upgrade --dry-run` (prints `deferred due to phasing`) rather than `apt list --upgradable`. The packages converge on their own as phasing ramps, or on the next scheduled patch run.
