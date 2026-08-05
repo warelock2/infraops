@@ -49,7 +49,7 @@ Audit of all secrets used by infraops. Last updated: 2026-08-01.
 
 - **Engine**: KV v2 mounted at `secret/`
 - **Tokens**: Two tokens, both created manually. Never write tokens to disk.
-  - **Read-only** (`infraops-check-ip-availability` policy): reads `secret/infraops/pfsense`, `secret/infraops/proxmox`, and `secret/infraops/nats`. Passed as `VAULT_TOKEN` env var. Forgejo secret: `VAULT_RO_TOKEN`.
+  - **Read-only** (`infraops-check-ip-availability` policy): reads `secret/infraops/pfsense`, `secret/infraops/proxmox`, `secret/infraops/nats`, and `secret/infraops/ntfy`. Passed as `VAULT_TOKEN` env var. Forgejo secret: `VAULT_RO_TOKEN`.
   - **Read-write** (`infraops-rw` policy): full CRUD on `secret/infraops/*`. Local use only. Not a Forgejo secret.
 - **Unsealed manually** — no auto-unseal configured.
 

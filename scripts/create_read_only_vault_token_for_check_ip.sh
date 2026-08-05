@@ -3,9 +3,10 @@
 # Create a scoped read-only Vault token for the IP-availability checker.
 #
 # Principle of least privilege: instead of a broad root/token, this writes a
-# narrow policy that only allows READING the pfSense/proxmox/nats paths under
-# secret/infraops/* (enough to check whether an IP is already allocated) and
-# mints a reusable, non-expiring token bound to that policy.
+# narrow policy that only allows READING the pfSense/proxmox/nats/ntfy paths
+# under secret/infraops/* (enough to check whether an IP is already allocated,
+# and for CI to read the ntfy channel) and mints a reusable, non-expiring
+# token bound to that policy.
 #
 # The emitted token goes to stdout — capture it, don't log it.
 # ===========================================================================
@@ -34,6 +35,12 @@ path "secret/data/infraops/nats" {
   capabilities = ["read"]
 }
 path "secret/metadata/infraops/nats" {
+  capabilities = ["read"]
+}
+path "secret/data/infraops/ntfy" {
+  capabilities = ["read"]
+}
+path "secret/metadata/infraops/ntfy" {
   capabilities = ["read"]
 }
 EOF
