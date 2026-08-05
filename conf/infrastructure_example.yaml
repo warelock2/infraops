@@ -41,7 +41,9 @@ platform:
 
 # ---------------------------------------------------------------------------
 # defaults — the fallback VM sizing and network settings every cluster uses
-# unless a cluster overrides them.
+# unless a cluster overrides them. vm applies to STANDALONE hosts and also
+# holds the VM ID pool they auto-allocate from; node_vm applies to cluster
+# node VMs.
 # ---------------------------------------------------------------------------
 defaults:
   cluster_type: k8s
@@ -50,9 +52,16 @@ defaults:
   gateway: "10.0.0.1"
   vm:
     cores: 2
-    memory_gb: 8
+    memory_gb: 2
     disk_gb: 32
-    datastore: local-lvm
+    datastore: RAIDZ
+    vm_id_start: 9100
+    vm_id_end: 9199
+  node_vm:
+    cores: 2
+    memory_gb: 2
+    disk_gb: 32
+    datastore: RAIDZ
   planes:
     control_plane:
       plane_name: control
@@ -80,7 +89,9 @@ clusters:
 
 # ---------------------------------------------------------------------------
 # hosts — standalone (non-cluster) hosts: connection info for Ansible,
-# services they run, and the DNS IP pool the IAC DNS workflow manages.
+# services they run, and the DNS IP pool the IAC DNS workflow manages. Hosts
+# with infrastructure_provisioning are built as VMs from defaults.vm (or a
+# vm: block override; explicit vm_id wins over range auto-allocation).
 # ---------------------------------------------------------------------------
 hosts:
   - name: docker
@@ -88,6 +99,14 @@ hosts:
       - configuration_management
     connection:
       host: docker.example.com
+      user: ansible
+
+  - name: testvm
+    enforcement:
+      - infrastructure_provisioning
+      - configuration_management
+    connection:
+      host: testvm.example.com
       user: ansible
 
   - name: firewall

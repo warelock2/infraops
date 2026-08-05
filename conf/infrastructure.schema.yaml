@@ -168,28 +168,60 @@ properties:
         description: Network gateway IP for static-configured VMs
       vm:
         type: object
-        description: Default VM resource configuration
+        description: Default VM resource configuration for standalone hosts
         additionalProperties: false
         properties:
           cores:
             type: integer
             minimum: 1
             default: 2
-            description: Default CPU cores per VM
+            description: Default CPU cores per standalone VM
           memory_gb:
             type: integer
             minimum: 1
-            default: 4
-            description: Default memory in GB per VM
+            default: 2
+            description: Default memory in GB per standalone VM
           disk_gb:
             type: integer
             minimum: 1
             default: 32
-            description: Default disk size in GB per VM
+            description: Default disk size in GB per standalone VM
           datastore:
             type: string
-            default: "local-lvm"
-            description: Default Proxmox datastore for VM disks
+            default: "RAIDZ"
+            description: Default Proxmox datastore for standalone VM disks
+          vm_id_start:
+            type: integer
+            minimum: 100
+            description: Start of the shared VM ID pool standalone VMs auto-allocate from
+          vm_id_end:
+            type: integer
+            minimum: 100
+            description: End of the shared VM ID pool standalone VMs auto-allocate from
+      node_vm:
+        type: object
+        description: Default VM resource configuration for cluster node VMs
+        additionalProperties: false
+        properties:
+          cores:
+            type: integer
+            minimum: 1
+            default: 2
+            description: Default CPU cores per cluster node VM
+          memory_gb:
+            type: integer
+            minimum: 1
+            default: 2
+            description: Default memory in GB per cluster node VM
+          disk_gb:
+            type: integer
+            minimum: 1
+            default: 32
+            description: Default disk size in GB per cluster node VM
+          datastore:
+            type: string
+            default: "RAIDZ"
+            description: Default Proxmox datastore for cluster node VM disks
       planes:
         type: object
         description: Default naming for node planes
@@ -450,13 +482,21 @@ properties:
           description: When true, an automatically rebooted after patching if /var/run/reboot-required is present
         vm:
           type: object
-          description: VM configuration overrides for Terraform provisioning
+          description: VM configuration overrides for Terraform provisioning (fall back to defaults.vm)
           additionalProperties: false
           properties:
             vm_id:
               type: integer
               minimum: 100
-              description: Proxmox VM ID for this host
+              description: Explicit Proxmox VM ID for this host (wins over range auto-allocation)
+            vm_id_start:
+              type: integer
+              minimum: 100
+              description: Start of this host's VM ID range override
+            vm_id_end:
+              type: integer
+              minimum: 100
+              description: End of this host's VM ID range override
             cores:
               type: integer
               minimum: 1
