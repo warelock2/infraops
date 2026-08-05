@@ -1,0 +1,70 @@
+# ===========================================================================
+# Final act — the universal post-patching step for every host opted into
+# configuration_management.
+#
+# Runs LAST in site.yaml (after the common baseline and the k8s plays) so a
+# reboot only ever happens once all configuration has landed. It is "universal"
+# because it applies to every managed host regardless of type:
+#
+#   1. Detect whether /var/run/reboot-required exists (apt sets it when a
+#      package/kernel upgrade needs a reboot to take effect).
+#   2. If a reboot is required AND the host is flagged post_patch_reboot: true
+#      (the schema default) — reboot it. ansible.builtin.reboot waits for SSH
+#      to come back, so the task returns only once the host is up again.
+#   3. If a reboot is required but the host is NOT flagged — notify the admin
+#      (warelock) via ntfy. The channel is read from Vault at CI runtime
+#      (secret/infraops/ntfy -> message_channel_phone) and passed in-memory as
+#      ntfy_message_channel; it is never written to disk.
+#   4. Final gate: wait_for_connection confirms every managed host answers SSH
+#      before the playbook exits.
+#
+# Silence on step 2 is intentional — a flagged host self-heals; we only bother
+# the admin when a host needs a reboot we are NOT allowed to perform.
+# ===========================================================================
+---
+- name: Final act — handle pending reboots
+  hosts: configuration_management
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Check if a reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: _reboot_required
+
+    - name: Reboot host
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+      when:
+        - _reboot_required.stat.exists
+        - post_patch_reboot | default(true) | bool
+
+    - name: Flag hosts needing a manual reboot
+      ansible.builtin.set_fact:
+        _needs_manual_reboot: "{{ _reboot_required.stat.exists and not (post_patch_reboot | default(true) | bool) }}"
+
+    - name: Notify admin of hosts requiring a manual reboot
+      ansible.builtin.uri:
+        url: "https://ntfy.sh/{{ ntfy_message_channel }}"
+        method: POST
+        headers:
+          Title: "InfraOps: reboot required"
+        body: "REBOOT PENDING: {{ _pending_reboot_hosts | join(', ') }}"
+      run_once: true
+      delegate_to: localhost
+      vars:
+        _pending_reboot_hosts: >-
+          {{ groups['configuration_management']
+             | select('in', ansible_play_hosts)
+             | map('extract', hostvars)
+             | selectattr('_needs_manual_reboot', 'equalto', true)
+             | map(attribute='inventory_hostname')
+             | list }}
+      when:
+        - ntfy_message_channel is defined
+        - _pending_reboot_hosts | length > 0
+
+    - name: Final gate — every managed host answers SSH
+      ansible.builtin.wait_for_connection:
+        delay: 0
+        timeout: 120
