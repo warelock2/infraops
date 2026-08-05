@@ -43,7 +43,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   echo "VMs to create/replace: $EXPECTED_VMS"
 
   # Apply the exact plan we inspected
-  terraform -chdir=terraform apply "$PLAN_FILE"
+  terraform -chdir=terraform apply "$PLAN_FILE" -parallelism=1
 
   # If nothing was created or replaced, no VM will signal — nothing to wait for
   if [ -z "$EXPECTED_VMS" ]; then
