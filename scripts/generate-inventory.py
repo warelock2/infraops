@@ -31,10 +31,13 @@ def build_vm_name(cluster_type: str, cluster_name: str, plane_name: str, node_nu
 def generate_inventory(infra: dict, dns_domain: str) -> dict:
     """Generate Ansible inventory from infrastructure config."""
     # Ansible inventory is a dict of GROUPS. The implicit "all" group holds
-    # every host; k8s_control / k8s_worker / docker_services are the groups
-    # the playbooks target. A host can be in "all" plus one or more groups.
+    # every host; configuration_management is the group common plays target
+    # (everything opted into config management via the enforcement tag);
+    # k8s_control / k8s_worker / docker_services are the role groups the
+    # k8s/service plays target. A host can be in "all" plus one or more groups.
     inventory = {
         "all": {"hosts": {}},
+        "configuration_management": {"hosts": {}},
         "k8s_control": {"hosts": {}},
         "k8s_worker": {"hosts": {}},
         "docker_services": {"hosts": {}},
@@ -61,6 +64,8 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
             name = build_vm_name(cluster_type, cluster_name, cp_plane_name, i)
             inventory["all"]["hosts"][name] = {"ansible_host": f"{name}.{dns_domain}"}
             inventory["k8s_control"]["hosts"][name] = {}
+            if "configuration_management" in enforcement:
+                inventory["configuration_management"]["hosts"][name] = {}
 
         # Process worker nodes
         worker_config = cluster.get("workers", {})
@@ -71,6 +76,8 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
             name = build_vm_name(cluster_type, cluster_name, worker_plane_name, i)
             inventory["all"]["hosts"][name] = {"ansible_host": f"{name}.{dns_domain}"}
             inventory["k8s_worker"]["hosts"][name] = {}
+            if "configuration_management" in enforcement:
+                inventory["configuration_management"]["hosts"][name] = {}
 
         # Create per-cluster group with vars
         # Ansible group vars (group_vars/k8s_<cluster>.*) could hold these,
@@ -102,8 +109,8 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
 
     # Process standalone hosts
     # Non-cluster hosts (docker, firewall) get an ansible_host/ansible_user
-    # for SSH; only those opted into configuration_management join the
-    # docker_services group the plays target.
+    # for SSH; those opted into configuration_management join the group the
+    # common plays target (and docker_services for service plays).
     hosts = infra.get("hosts", [])
     for host in hosts:
         name = host["name"]
@@ -116,6 +123,7 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
 
         enforcement = host.get("enforcement", [])
         if "configuration_management" in enforcement:
+            inventory["configuration_management"]["hosts"][name] = host_vars
             inventory["docker_services"]["hosts"][name] = host_vars
 
     return inventory

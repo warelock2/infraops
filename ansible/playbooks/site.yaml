@@ -4,6 +4,11 @@
 # The "umbrella" playbook. Running `ansible-playbook site.yaml` simply chains
 # into the real playbooks. import_playbook is a static include — the playbooks
 # are merged at parse time, so their plays all run within this one invocation.
+#
+# Order matters: the common baseline (accounts + patching) runs first on every
+# host marked for configuration_management, then the k8s cluster plays handle
+# the cluster-specific setup on top.
 # ===========================================================================
 ---
+- import_playbook: common.yaml
 - import_playbook: k8s-cluster.yaml

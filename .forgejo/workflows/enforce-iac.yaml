@@ -120,7 +120,9 @@ jobs:
         with:
           args: >
             sh -c "CLUSTERS=$(yq '.clusters | length' conf/infrastructure.yaml) &&
-            echo \"has_clusters=$([ \"$CLUSTERS\" -gt 0 ] && echo true || echo false)\" >> $GITHUB_OUTPUT"
+            echo \"has_clusters=$([ \"$CLUSTERS\" -gt 0 ] && echo true || echo false)\" >> $GITHUB_OUTPUT &&
+            CM_TAGGED=$(yq '[.clusters[]?.enforcement[], .hosts[]?.enforcement[]] | any_c(. == \"configuration_management\")' conf/infrastructure.yaml) &&
+            echo \"has_config_management=$CM_TAGGED\" >> $GITHUB_OUTPUT"
 
       - name: K8s Drain Removed Nodes
         if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true'
@@ -173,21 +175,22 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       # ---------------------------------------------------------------------
-      # Config management only runs when the readiness gate passed. The
-      # inventory is generated from infrastructure.yaml, then site.yaml
-      # (k8s-cluster plays) configures the nodes over SSH with keys passed
-      # in via secrets. Because of the gate, the plays assume manageable
-      # hosts — no boot-polling, just configuration.
+      # Config management only runs when the readiness gate passed AND at
+      # least one entity (cluster or host) is tagged configuration_management
+      # in infrastructure.yaml. The inventory is generated from that file,
+      # then site.yaml (common baseline + k8s-cluster plays) configures the
+      # hosts over SSH with keys passed in via secrets. Because of the gate,
+      # the plays assume manageable hosts — no boot-polling, just config.
       # ---------------------------------------------------------------------
       - name: Generate Ansible Inventory
-        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true' && steps.apply-wait.outputs.ready == 'true'
+        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_config_management == 'true' && steps.apply-wait.outputs.ready == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
             sh -c "python3 scripts/generate-inventory.py --output ansible/inventory.json"
 
       - name: Configuration Management
-        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true' && steps.apply-wait.outputs.ready == 'true'
+        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_config_management == 'true' && steps.apply-wait.outputs.ready == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >

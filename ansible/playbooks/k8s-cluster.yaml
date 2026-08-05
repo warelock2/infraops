@@ -7,69 +7,20 @@
 # groups are: k8s_control, k8s_worker, docker_services.
 #
 # Execution order matters:
-#   1. Bootstrap an admin user on every node (so later plays can connect as
-#      that user instead of the default cloud-init user).
-#   2. Configure every node's base OS for k8s (kernel modules, sysctl,
+#   1. Configure every node's base OS for k8s (kernel modules, sysctl,
 #      containerd, the k8s apt repo and pinned binaries).
-#   3. Set up keepalived + haproxy on control plane nodes so the API server
+#   2. Set up keepalived + haproxy on control plane nodes so the API server
 #      is reachable at one virtual IP (VIP) even if a control node dies.
-#   4. Register the cluster API DNS name (k8s-<cluster>-api) on pfSense.
-#   5. Initialize the control plane (kubeadm init on the leader, join for
+#   3. Register the cluster API DNS name (k8s-<cluster>-api) on pfSense.
+#   4. Initialize the control plane (kubeadm init on the leader, join for
 #      the rest), install Calico CNI, and publish join commands via hostvars.
-#   6. Join the workers using the command the leader generated.
-#   7. Apply RBAC so OIDC groups can act on the cluster.
+#   5. Join the workers using the command the leader generated.
+#   6. Apply RBAC so OIDC groups can act on the cluster.
 #
-# Play 1 — "become: yes" elevates to root for every task in this play.
+# The admin user + patching baseline is NOT here — it lives in common.yaml
+# (site.yaml imports it first). This playbook assumes those are done.
 # ---------------------------------------------------------------------------
-- name: "Create admin user on all nodes"
-  hosts: k8s_control:k8s_worker:docker_services
-  become: yes
-  gather_facts: false
-  tasks:
-    # Single run-wide connection gate. The readiness handshake has already
-    # proven created VMs are booted, past the cloud-init reboot, and sshd is
-    # up (see scripts/cloud-init-reboot.yaml.template); persistent hosts like
-    # docker_services are not Terraform-created and are always up. So this is
-    # just a cheap "every target answers SSH" check that also verifies the
-    # ansible SSH key authenticates, before any config work begins.
-    - name: Wait for SSH
-      ansible.builtin.wait_for_connection:
-        delay: 0
-        timeout: 120
-
-    - name: Create admin user
-      ansible.builtin.user:
-        name: "{{ infra_admin_user }}"
-        shell: /bin/bash
-        groups: sudo
-        append: yes
-        state: present
-
-    - name: Create .ssh directory
-      ansible.builtin.file:
-        path: "/home/{{ infra_admin_user }}/.ssh"
-        state: directory
-        mode: "0700"
-        owner: "{{ infra_admin_user }}"
-        group: "{{ infra_admin_group }}"
-
-    - name: Add SSH public key
-      ansible.posix.authorized_key:
-        user: "{{ infra_admin_user }}"
-        state: present
-        key: "{{ lookup('file', infra_ssh_key_file) }}"
-        exclusive: no
-
-    - name: "Ensure {{ infra_admin_user }} can sudo without password"
-      ansible.builtin.lineinfile:
-        path: "/etc/sudoers.d/{{ infra_admin_user }}"
-        line: "{{ infra_admin_user }} ALL=(ALL) NOPASSWD: ALL"
-        create: yes
-        mode: "0440"
-        validate: "visudo -cf %s"
-
-# ---------------------------------------------------------------------------
-# Play 2 — Base OS preparation on every k8s node.
+# Play 1 — Base OS preparation on every k8s node.
 #
 # Kernel prerequisites: overlay + br_netfilter modules (needed for the CNI
 # network), sysctl for IPv4 forwarding and bridge traffic filtering.
@@ -212,7 +163,7 @@
       when: inventory_hostname in groups['k8s_control']
 
 # ---------------------------------------------------------------------------
-# Play 3 — High-availability API endpoint.
+# Play 2 — High-availability API endpoint.
 #
 # keepalived runs the Virtual Router Redundancy Protocol (VRRP): it assigns
 # the VIP to one control node and fails it over to another if the holder
@@ -291,7 +242,7 @@
         state: restarted
 
 # ---------------------------------------------------------------------------
-# Play 4 — Register the cluster API DNS name on pfSense.
+# Play 3 — Register the cluster API DNS name on pfSense.
 #
 # "hosts: localhost / connection: local" runs entirely on the control node
 # running Ansible (no remote target). It reads infrastructure.yaml via
@@ -375,7 +326,7 @@
           ip: "{{ _cluster.control_plane.vip }}"
 
 # ---------------------------------------------------------------------------
-# Play 5 — Initialize the control plane.
+# Play 4 — Initialize the control plane.
 #
 # "serial: 1" runs this play ONE host at a time, so the leader fully
 # initializes (and publishes join commands to hostvars) before the next
@@ -384,7 +335,7 @@
 #
 # Facts shared between hosts: set_fact on the leader is readable by workers
 # via hostvars[cp_leader]. The admin kubeconfig, join token, certificate key
-# and Calico manifest are all produced here and consumed in Play 6.
+# and Calico manifest are all produced here and consumed in Play 5.
 # ---------------------------------------------------------------------------
 - name: K8s control plane init
   hosts: k8s_control
@@ -535,7 +486,7 @@
       when: inventory_hostname == cp_leader
 
 # ---------------------------------------------------------------------------
-# Play 6 — Join workers.
+# Play 5 — Join workers.
 #
 # Each worker reads the join command the leader stored in hostvars and runs
 # it. kubelet.conf existing means the node already joined (stat check) so the
@@ -580,7 +531,7 @@
           chmod 0600 "/home/{{ infra_admin_user }}/.kube/config"
 
 # ---------------------------------------------------------------------------
-# Play 7 — RBAC.
+# Play 6 — RBAC.
 #
 # Maps OIDC identity groups (configured in Keycloak) to Kubernetes roles.
 # cluster-admin binds the k8s-admins and <cluster>-admins groups to full
