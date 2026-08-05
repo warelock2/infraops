@@ -24,7 +24,7 @@ extract_created_vms() {
     [.resource_changes[]
      | select(.type == "proxmox_virtual_environment_vm")
      | select(.change.actions | index("create"))
-     | [((.index.key // .name)), ((.change.after.vm_id // .change.before.vm_id) | tostring)]
+     | [((.index // .name)), ((.change.after.vm_id // .change.before.vm_id) | tostring)]
      | join(":")] | .[]'
 }
 
@@ -43,7 +43,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   echo "VMs to create/replace: $EXPECTED_VMS"
 
   # Apply the exact plan we inspected
-  terraform -chdir=terraform apply "$PLAN_FILE" -parallelism=1
+  terraform -chdir=terraform apply -parallelism=1 "$PLAN_FILE"
 
   # If nothing was created or replaced, no VM will signal — nothing to wait for
   if [ -z "$EXPECTED_VMS" ]; then
