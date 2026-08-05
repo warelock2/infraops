@@ -11,7 +11,14 @@
 #   2. If a reboot is required AND the host is flagged post_patch_reboot: true
 #      (the schema default) — reboot it. ansible.builtin.reboot waits for SSH
 #      to come back, so the task returns only once the host is up again.
-#   3. If a reboot is required but the host is NOT flagged — notify the admin
+#      k8s cluster nodes are handled differently: when the cluster has 3+
+#      control plane nodes (etcd quorum), flagged nodes are rebooted one at a
+#      time via an orderly drain -> reboot -> rejoin check -> uncordon, so the
+#      control plane keeps serving throughout. A cluster below 3 control
+#      planes must NOT be auto-rebooted (it would take the API down), so those
+#      nodes are treated as manual instead.
+#   3. If a reboot is required but the host is NOT flagged — or it is a k8s
+#      node whose cluster cannot sustain an orderly reboot — notify the admin
 #      (warelock) via ntfy. The channel is read from Vault at CI runtime
 #      (secret/infraops/ntfy -> message_channel_phone) and passed in-memory as
 #      ntfy_message_channel; it is never written to disk.
@@ -32,16 +39,53 @@
         path: /var/run/reboot-required
       register: _reboot_required
 
+    - name: Classify host for reboot handling
+      ansible.builtin.set_fact:
+        _is_k8s_node: "{{ inventory_hostname in (groups.get('k8s_control', []) + groups.get('k8s_worker', [])) }}"
+        _cp_count: "{{ groups.get('k8s_control', []) | length }}"
+        _orderly_reboot: >-
+          {{ _reboot_required.stat.exists
+             and (post_patch_reboot | default(true) | bool)
+             and (groups.get('k8s_control', []) | length | int) >= 3
+             and inventory_hostname in (groups.get('k8s_control', []) + groups.get('k8s_worker', [])) }}
+
     - name: Reboot host
       ansible.builtin.reboot:
         reboot_timeout: 600
       when:
         - _reboot_required.stat.exists
         - post_patch_reboot | default(true) | bool
+        - not _is_k8s_node
+
+    - name: Compute ordered k8s reboot targets
+      ansible.builtin.set_fact:
+        _ordered_reboot_targets: >-
+          {{ (_reboot_candidates | intersect(groups.get('k8s_worker', [])) | sort)
+             + (_reboot_candidates | intersect(groups.get('k8s_control', [])) | sort) }}
+      run_once: true
+      vars:
+        _reboot_candidates: >-
+          {{ ansible_play_hosts
+             | select('in', groups.get('k8s_control', []) + groups.get('k8s_worker', []))
+             | map('extract', hostvars)
+             | selectattr('_orderly_reboot', 'equalto', true)
+             | map(attribute='inventory_hostname')
+             | list }}
+
+    - name: Orderly reboot k8s nodes one at a time
+      ansible.builtin.include_tasks: tasks/final-act-reboot-node.yaml
+      run_once: true
+      loop: "{{ _ordered_reboot_targets }}"
+      loop_control:
+        loop_var: _node
+      when: _ordered_reboot_targets | length > 0
 
     - name: Flag hosts needing a manual reboot
       ansible.builtin.set_fact:
-        _needs_manual_reboot: "{{ _reboot_required.stat.exists and not (post_patch_reboot | default(true) | bool) }}"
+        _needs_manual_reboot: >-
+          {{ _reboot_required.stat.exists
+             and ((not (post_patch_reboot | default(true) | bool))
+                  or (_is_k8s_node and (_cp_count | int) < 3)) }}
 
     - name: Notify admin of hosts requiring a manual reboot
       ansible.builtin.uri:
