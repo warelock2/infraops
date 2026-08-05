@@ -31,14 +31,14 @@ write_files:
       Description=VM Readiness Heartbeat
       After=cloud-init.service network-online.target sshd.service
       Wants=network-online.target
+      StartLimitBurst=3
+      StartLimitIntervalSec=300
 
       [Service]
       Type=simple
       ExecStart=/usr/local/bin/helloworld.sh
       Restart=on-failure
       RestartSec=30
-      StartLimitBurst=3
-      StartLimitIntervalSec=300
 
       [Install]
       WantedBy=multi-user.target
