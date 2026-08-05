@@ -55,11 +55,18 @@ Default values applied to all clusters and VMs
 | `defaults.service_type (1)` | string | `docker_compose` | `values: docker_compose, helm, systemd, nomad_job, ecs_service` | Default service deployment method |
 | `defaults.service_host (1)` | string | — | `minLength: 1` | Default host for running services |
 | `defaults.gateway (1)` | string | — | `pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$` | Network gateway IP for static-configured VMs |
-| `defaults.vm (1)` | object | — | — | Default VM resource configuration |
-| `defaults.vm.cores (2)` | integer | `2` | `min: 1` | Default CPU cores per VM |
-| `defaults.vm.memory_gb (2)` | integer | `4` | `min: 1` | Default memory in GB per VM |
-| `defaults.vm.disk_gb (2)` | integer | `32` | `min: 1` | Default disk size in GB per VM |
-| `defaults.vm.datastore (2)` | string | `local-lvm` | — | Default Proxmox datastore for VM disks |
+| `defaults.vm (1)` | object | — | — | Default VM resource configuration for standalone hosts |
+| `defaults.vm.cores (2)` | integer | `2` | `min: 1` | Default CPU cores per standalone VM |
+| `defaults.vm.memory_gb (2)` | integer | `2` | `min: 1` | Default memory in GB per standalone VM |
+| `defaults.vm.disk_gb (2)` | integer | `32` | `min: 1` | Default disk size in GB per standalone VM |
+| `defaults.vm.datastore (2)` | string | `RAIDZ` | — | Default Proxmox datastore for standalone VM disks |
+| `defaults.vm.vm_id_start (2)` | integer | — | `min: 100` | Start of the shared VM ID pool standalone VMs auto-allocate from |
+| `defaults.vm.vm_id_end (2)` | integer | — | `min: 100` | End of the shared VM ID pool standalone VMs auto-allocate from |
+| `defaults.node_vm (1)` | object | — | — | Default VM resource configuration for cluster node VMs |
+| `defaults.node_vm.cores (2)` | integer | `2` | `min: 1` | Default CPU cores per cluster node VM |
+| `defaults.node_vm.memory_gb (2)` | integer | `2` | `min: 1` | Default memory in GB per cluster node VM |
+| `defaults.node_vm.disk_gb (2)` | integer | `32` | `min: 1` | Default disk size in GB per cluster node VM |
+| `defaults.node_vm.datastore (2)` | string | `RAIDZ` | — | Default Proxmox datastore for cluster node VM disks |
 | `defaults.planes (1)` | object | — | — | Default naming for node planes |
 | `defaults.planes.control_plane (2)` | object | — | — | Default configuration for control plane nodes |
 | `defaults.planes.control_plane.plane_name (3)` | string | `control` | `pattern: ^[a-z][a-z0-9_-]*$` | Naming prefix for control plane nodes |
@@ -77,6 +84,7 @@ Type: `array`
 | `clusters[].name (2)` | string | — | `minLength: 1` | Cluster name (used in resource naming and DNS) |
 | `clusters[].oidc_issuer_url (2)` | string | — | `format: uri` | OIDC issuer URL override for this cluster |
 | `clusters[].immutable (2)` | boolean | `False` | — | When true, configuration management skips this cluster and monitors for break-glass access |
+| `clusters[].post_patch_reboot (2)` | boolean | `True` | — | When true, an automatically rebooted after patching if /var/run/reboot-required is present |
 | `clusters[].enforcement (2)` | array | `['infrastructure_provisioning', 'configuration_management']` | — | Enforcement policies for this cluster |
 | `clusters[].cluster_type (2)` | string | — | `values: k8s, nomad, swarm, ecs` | Cluster type override |
 | `clusters[].drawio_icon (2)` | string | `mxgraph.kubernetes.kubernetes_cluster` | — | Draw.io icon for cluster visualization |
@@ -126,8 +134,11 @@ Type: `array`
 | `hosts[].ip_pool.end (3)` | string | — | `pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$` | End of IAC-managed IP range |
 | `hosts[].enforcement (2)` | array | — | — | Enforcement policies for this host |
 | `hosts[].immutable (2)` | boolean | `False` | — | When true, configuration management skips this host and monitors for break-glass access |
-| `hosts[].vm (2)` | object | — | — | VM configuration overrides for Terraform provisioning |
-| `hosts[].vm.vm_id (3)` | integer | — | `min: 100` | Proxmox VM ID for this host |
+| `hosts[].post_patch_reboot (2)` | boolean | `True` | — | When true, an automatically rebooted after patching if /var/run/reboot-required is present |
+| `hosts[].vm (2)` | object | — | — | VM configuration overrides for Terraform provisioning (fall back to defaults.vm) |
+| `hosts[].vm.vm_id (3)` | integer | — | `min: 100` | Explicit Proxmox VM ID for this host (wins over range auto-allocation) |
+| `hosts[].vm.vm_id_start (3)` | integer | — | `min: 100` | Start of this host's VM ID range override |
+| `hosts[].vm.vm_id_end (3)` | integer | — | `min: 100` | End of this host's VM ID range override |
 | `hosts[].vm.cores (3)` | integer | — | `min: 1` | CPU cores override |
 | `hosts[].vm.memory_gb (3)` | integer | — | `min: 1` | Memory (GB) override |
 | `hosts[].vm.disk_gb (3)` | integer | — | `min: 1` | Disk size (GB) override |

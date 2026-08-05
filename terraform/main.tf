@@ -129,10 +129,10 @@ locals {
             n + 1,
           )
           vm_id     = try(c[plane].vm_id_start + n, -1)
-          cores     = try(c[plane].cores, try(c.plane_defaults[plane].cores, local.infra.defaults.vm.cores))
-          memory_gb = try(c[plane].memory_gb, try(c.plane_defaults[plane].memory_gb, local.infra.defaults.vm.memory_gb))
-          disk_gb   = try(c[plane].disk_gb, try(c.plane_defaults[plane].disk_gb, local.infra.defaults.vm.disk_gb))
-          datastore = try(c[plane].datastore, local.infra.defaults.vm.datastore)
+          cores     = try(c[plane].cores, try(c.plane_defaults[plane].cores, local.infra.defaults.node_vm.cores))
+          memory_gb = try(c[plane].memory_gb, try(c.plane_defaults[plane].memory_gb, local.infra.defaults.node_vm.memory_gb))
+          disk_gb   = try(c[plane].disk_gb, try(c.plane_defaults[plane].disk_gb, local.infra.defaults.node_vm.disk_gb))
+          datastore = try(c[plane].datastore, local.infra.defaults.node_vm.datastore)
         }
       ]
     ])
@@ -155,11 +155,19 @@ locals {
   }
 
   # Standalone hosts that Terraform should provision — same enforcement
-  # filter as clusters. A host listed here but without vm.vm_id will fail a
-  # precondition on the resource (see the standalone resource below).
+  # filter as clusters. Each host's VM ID comes from the standalone_vm_ids
+  # data source below (explicit vm.vm_id wins; otherwise first-free in the
+  # host's range or the defaults.vm pool).
   standalone_hosts_provision = {
     for h in try(local.infra.hosts, []) : h.name => h
     if contains(try(h.enforcement, []), "infrastructure_provisioning")
+  }
+
+  # Resolved VM ID per provisioned standalone host. scripts/standalone-vm-ids.py
+  # computes the full allocation (template ID, cluster node IDs and explicit
+  # host IDs are all reserved) and this host's own ID is read back.
+  standalone_vm_ids = {
+    for h in local.standalone_hosts_provision : h.name => tonumber(data.external.standalone_vm_id[h.name].result.vm_id)
   }
 
   # Per-cluster groups with OIDC issuer URL override.
@@ -197,7 +205,7 @@ locals {
   # VM ID validation — collected before any resource is created.
   all_vm_ids = concat(
     [for n in local.node_list : n.vm_id if n.vm_id > 0],
-    [for h in local.standalone_hosts_provision : try(h.vm.vm_id, -1) if try(h.vm.vm_id, -1) > 0]
+    values(local.standalone_vm_ids)
   )
 
   # Check 1: no plane may exceed its declared vm_id_end range. The condition
@@ -398,6 +406,16 @@ data "external" "standalone_dns_lookup" {
   program    = ["sh", "${path.root}/../scripts/dns-lookup.sh", "${each.key}.${local.dns_domain}"]
 }
 
+# Standalone host VM ID allocation
+# scripts/standalone-vm-ids.py returns the host's VM ID: explicit vm.vm_id
+# wins, otherwise first-free in the host's range (or defaults.vm pool). The
+# script reserves the template ID and all cluster node IDs, so nothing here
+# can collide with existing VMs.
+data "external" "standalone_vm_id" {
+  for_each = local.standalone_hosts_provision
+  program  = ["python3", "${path.root}/../scripts/standalone-vm-ids.py", each.key]
+}
+
 # Standalone host VMs
 # Near-identical to the cluster VM resource but reads attributes from the
 # host entry in YAML (h.vm.*) instead of from the expanded node_list, with
@@ -406,12 +424,12 @@ resource "proxmox_virtual_environment_vm" "standalone" {
   for_each  = local.standalone_hosts_provision
   name      = each.key
   node_name = local.proxmox_target_node
-  vm_id     = try(each.value.vm.vm_id, -1)
+  vm_id     = local.standalone_vm_ids[each.key]
 
   lifecycle {
     precondition {
-      condition     = try(each.value.vm.vm_id, -1) > 0
-      error_message = "Standalone host ${each.key} has invalid VM ID: ${try(each.value.vm.vm_id, -1)}"
+      condition     = local.standalone_vm_ids[each.key] > 0
+      error_message = "Standalone host ${each.key} has invalid VM ID: ${local.standalone_vm_ids[each.key]}"
     }
 
     precondition {
@@ -457,7 +475,7 @@ resource "proxmox_virtual_environment_vm" "standalone" {
   }
 
   smbios {
-    serial = tostring(each.value.vm_id)
+    serial = tostring(local.standalone_vm_ids[each.key])
   }
 
   initialization {
