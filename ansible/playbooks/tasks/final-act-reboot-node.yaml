@@ -1,0 +1,51 @@
+# ===========================================================================
+# Task file: orderly reboot ONE k8s node (drain -> reboot -> rejoin -> uncordon).
+#
+# Included from final-act.yaml in a loop, so `_node` is set per iteration and
+# nodes are processed one at a time. Runs on the controller; the reboot itself
+# is delegated to the target node so ansible.builtin.reboot uses that node's
+# connection params and returns only once SSH is back. The k8s API calls
+# (drain/wait/uncordon) run on localhost with the runner's kubeconfig.
+#
+# kubeadm stacked etcd: static/mirror pods (etcd, kube-apiserver, ...) are
+# never deleted by drain, and DaemonSet pods (calico-node, kube-proxy) are
+# left running, so the node rejoins on its own after reboot — no --force and
+# no kubeadm join needed. `--delete-emptydir-data` covers evicted workloads
+# that use emptyDir volumes.
+# ===========================================================================
+---
+- name: Drain k8s node
+  ansible.builtin.command:
+    cmd: >-
+      kubectl drain {{ _node }}
+      --ignore-daemonsets
+      --delete-emptydir-data
+      --timeout=180s
+  delegate_to: localhost
+  become: false
+
+- name: Reboot k8s node
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+  delegate_to: "{{ _node }}"
+
+- name: Wait for k8s node to rejoin
+  ansible.builtin.command:
+    cmd: kubectl wait --for=condition=Ready node/{{ _node }} --timeout=300s
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Wait for etcd static pod on control plane node
+  ansible.builtin.command:
+    cmd: kubectl wait --for=condition=Ready pod/etcd-{{ _node }} -n kube-system --timeout=300s
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  when: _node in groups.get('k8s_control', [])
+
+- name: Uncordon k8s node
+  ansible.builtin.command:
+    cmd: kubectl uncordon {{ _node }}
+  delegate_to: localhost
+  become: false
