@@ -154,7 +154,7 @@ write_files:
         rm -f "$ack_file"
 
         log "subscribing to $ACK_PREFIX.$AUTH_HOSTNAME for ack"
-        nats sub "$ACK_PREFIX.$AUTH_HOSTNAME" --context="$CONTEXT" --count=1 --timeout="$ACK_TIMEOUT" > "$ack_file" 2>/dev/null &
+        nats sub "$ACK_PREFIX.$AUTH_HOSTNAME" --context="$CONTEXT" --count=1 --timeout="${ACK_TIMEOUT}s" > "$ack_file" 2>/dev/null &
         local sub_pid=$!
 
         sleep 2
