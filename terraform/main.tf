@@ -317,9 +317,10 @@ resource "proxmox_virtual_environment_vm" "vm" {
   timeout_clone = 600
 
   clone {
-    vm_id   = local.template_id
-    full    = !local.linked_clone
-    retries = 2
+    vm_id        = local.template_id
+    full         = !local.linked_clone
+    datastore_id = each.value.datastore
+    retries      = 2
   }
 
   cpu {
@@ -431,9 +432,10 @@ resource "proxmox_virtual_environment_vm" "standalone" {
   timeout_clone = 600
 
   clone {
-    vm_id   = local.template_id
-    full    = !local.linked_clone
-    retries = 2
+    vm_id        = local.template_id
+    full         = !local.linked_clone
+    datastore_id = try(each.value.vm.datastore, local.infra.defaults.vm.datastore)
+    retries      = 2
   }
 
   cpu {
