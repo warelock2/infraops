@@ -7,8 +7,10 @@
 #
 # Order matters: the common baseline (accounts + patching) runs first on every
 # host marked for configuration_management, then the k8s cluster plays handle
-# the cluster-specific setup on top.
+# the cluster-specific setup on top, and the final act (reboot handling) runs
+# last so a reboot only happens once all configuration has landed.
 # ===========================================================================
 ---
 - import_playbook: common.yaml
 - import_playbook: k8s-cluster.yaml
+- import_playbook: final-act.yaml

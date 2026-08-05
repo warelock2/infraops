@@ -65,7 +65,9 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
             inventory["all"]["hosts"][name] = {"ansible_host": f"{name}.{dns_domain}"}
             inventory["k8s_control"]["hosts"][name] = {}
             if "configuration_management" in enforcement:
-                inventory["configuration_management"]["hosts"][name] = {}
+                inventory["configuration_management"]["hosts"][name] = {
+                    "post_patch_reboot": cluster.get("post_patch_reboot", True)
+                }
 
         # Process worker nodes
         worker_config = cluster.get("workers", {})
@@ -77,7 +79,9 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
             inventory["all"]["hosts"][name] = {"ansible_host": f"{name}.{dns_domain}"}
             inventory["k8s_worker"]["hosts"][name] = {}
             if "configuration_management" in enforcement:
-                inventory["configuration_management"]["hosts"][name] = {}
+                inventory["configuration_management"]["hosts"][name] = {
+                    "post_patch_reboot": cluster.get("post_patch_reboot", True)
+                }
 
         # Create per-cluster group with vars
         # Ansible group vars (group_vars/k8s_<cluster>.*) could hold these,
@@ -118,6 +122,7 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
         host_vars = {
             "ansible_host": connection.get("host", name),
             "ansible_user": connection.get("user", "ansible"),
+            "post_patch_reboot": host.get("post_patch_reboot", True),
         }
         inventory["all"]["hosts"][name] = host_vars
 

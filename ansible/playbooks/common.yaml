@@ -14,8 +14,9 @@
 #            ansible.pub key) and Terraform also injects it via user_account.
 #   Play 2 — patching: apt update + upgrade. kubelet/kubeadm/kubectl are
 #            apt-mark held by the k8s playbook on existing nodes, so upgrades
-#            never break the cluster. A kernel/pkg upgrade is reported as
-#            "reboot pending" but never auto-reboots (reboots are planned).
+#            never break the cluster. Whether to reboot afterwards is decided
+#            by the final-act playbook (site.yaml runs it last) based on the
+#            per-host post_patch_reboot flag in the SSOT.
 # ===========================================================================
 ---
 - name: Baseline accounts on all managed hosts
@@ -70,8 +71,8 @@
 #
 # Runs on the same managed set. Uses "safe" upgrade (plain apt upgrade, not
 # dist-upgrade) so held packages (the k8s trio on existing nodes) are left
-# alone. After upgrading, we report whether a reboot is required — the kernel
-# only activates on reboot, so the operator decides when to schedule it.
+# alone. Reboot handling is NOT here — final-act.yaml decides whether to reboot
+# or notify based on each host's post_patch_reboot flag in the SSOT.
 # ---------------------------------------------------------------------------
 - name: Patch all managed hosts
   hosts: configuration_management
@@ -86,12 +87,3 @@
     - name: Upgrade installed packages
       ansible.builtin.apt:
         upgrade: safe
-
-    - name: Check if a reboot is required
-      ansible.builtin.stat:
-        path: /var/run/reboot-required
-      register: _reboot_required
-
-    - name: Report reboot status
-      ansible.builtin.debug:
-        msg: "{{ 'REBOOT PENDING — schedule a reboot to activate kernel/package updates' if _reboot_required.stat.exists else 'No reboot required' }}"

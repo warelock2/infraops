@@ -197,6 +197,9 @@ jobs:
             sh -c '
             if [ -z "$ADMIN_SSH_PUBLIC_KEY" ]; then echo "ERROR: ADMIN_SSH_PUBLIC_KEY not set" && exit 1; fi &&
             if [ -z "$ANSIBLE_SSH_PRIVATE_KEY" ]; then echo "ERROR: ANSIBLE_SSH_PRIVATE_KEY not set" && exit 1; fi &&
+            export VAULT_ADDR=https://vault.afobl.com &&
+            export VAULT_SKIP_VERIFY=true &&
+            NTFY_CHANNEL=$(vault kv get -field=message_channel_phone secret/infraops/ntfy) &&
             K8S_VERSION=$(yq .platform.kubernetes.version conf/infrastructure.yaml) &&
             BAKED_KUBECTL=$(kubectl version --client -o yaml | yq .clientVersion.gitVersion) &&
             case "$BAKED_KUBECTL" in *"$K8S_VERSION"*) ;; *)
@@ -221,7 +224,8 @@ jobs:
             -e infra_admin_group=$(yq .platform.admin.group conf/infrastructure.yaml)
             -e infra_ssh_key_file=/tmp/ssh_key.pub
             -e git_commit=$GIT_COMMIT
-            -e git_tag=$GIT_TAG'
+            -e git_tag=$GIT_TAG
+            -e ntfy_message_channel=$NTFY_CHANNEL'
         env:
           ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
           ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}

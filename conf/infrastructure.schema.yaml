@@ -244,6 +244,10 @@ properties:
           type: boolean
           default: false
           description: When true, configuration management skips this cluster and monitors for break-glass access
+        post_patch_reboot:
+          type: boolean
+          default: true
+          description: When true, an automatically rebooted after patching if /var/run/reboot-required is present
         enforcement:
           type: array
           items:
@@ -440,6 +444,10 @@ properties:
           type: boolean
           default: false
           description: When true, configuration management skips this host and monitors for break-glass access
+        post_patch_reboot:
+          type: boolean
+          default: true
+          description: When true, an automatically rebooted after patching if /var/run/reboot-required is present
         vm:
           type: object
           description: VM configuration overrides for Terraform provisioning
