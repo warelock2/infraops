@@ -36,6 +36,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     sh scripts/terraform-init-retry.sh -chdir=terraform init -reconfigure
   fi
 
+  echo "=== PHASE: APPLY ==="
   # Plan to a file so we can inspect exactly what will be created
   terraform -chdir=terraform plan -out="$PLAN_FILE" -no-color -input=false -parallelism=1
 
@@ -54,6 +55,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     exit 0
   fi
 
+  echo "=== PHASE: ACCEPT/READINESS GATE ==="
   echo "=== Polling for readiness (${READINESS_TIMEOUT}s) ==="
   rm -f "$FAILED_VMS_FILE"
   rm -f "$DECLARED_FAILURES_FILE"
@@ -64,6 +66,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     exit 0
   fi
 
+  echo "=== PHASE: REJECT/DESTROY ==="
   echo "=== Readiness failed - handling botched VMs ==="
   FAILED_VMS=$(cat "$FAILED_VMS_FILE" 2>/dev/null || echo "")
   DECLARED_FAILURES=$(cat "$DECLARED_FAILURES_FILE" 2>/dev/null || echo "")

@@ -16,8 +16,12 @@
 # filters on that subject so wait-for-readiness.sh can detect a declared
 # failure and halt the production line for forensics.
 #
-# Idempotent: consumer add and the info calls use || true so a missing or
-# already-existing consumer doesn't fail the run.
+# Idempotent: the consumer is deleted (if present) and recreated fresh with
+# --deliver=new so it only sees readiness signals published AFTER this run
+# started. A stale position inherited from a prior/cancelled run would make
+# wait-for-readiness.sh miss a freshly-created VM's signal and falsely reject
+# it, causing the apply/gate loop to cycle. The || true keeps missing or
+# already-existing consumers from failing the run.
 # ===========================================================================
 set -ex
 
@@ -33,19 +37,21 @@ nats context add iac-orchestrator \
   --server tls://midas.afobl.com:4222 \
   --user iac-orchestrator --password "$NATS_IAC_PASSWORD"
 
-echo "=== Ensuring readiness-poller consumer exists ==="
+echo "=== Resetting readiness-poller consumer (delete + recreate fresh) ==="
+nats consumer rm infraops readiness-poller --context=iac-orchestrator 2>/dev/null || true
 nats consumer add infraops readiness-poller \
-  --pull --ack=explicit --deliver=all \
+  --pull --ack=explicit --deliver=new \
   --filter="infraops.helloworld" \
   --replay=instant --max-deliver=-1 --max-pending=-1 \
-  --defaults --context=iac-orchestrator || true
+  --context=iac-orchestrator || true
 
-echo "=== Ensuring failure-poller consumer exists ==="
+echo "=== Resetting failure-poller consumer (delete + recreate fresh) ==="
+nats consumer rm infraops failure-poller --context=iac-orchestrator 2>/dev/null || true
 nats consumer add infraops failure-poller \
-  --pull --ack=explicit --deliver=all \
+  --pull --ack=explicit --deliver=new \
   --filter="infraops.helloworld.fail.>" \
   --replay=instant --max-deliver=-1 --max-pending=-1 \
-  --defaults --context=iac-orchestrator || true
+  --context=iac-orchestrator || true
 
 echo "=== Consumer info ==="
 nats consumer info infraops readiness-poller --context=iac-orchestrator || true
