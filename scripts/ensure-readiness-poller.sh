@@ -38,19 +38,19 @@ nats context add iac-orchestrator \
   --user iac-orchestrator --password "$NATS_IAC_PASSWORD"
 
 echo "=== Resetting readiness-poller consumer (delete + recreate fresh) ==="
-nats consumer rm infraops readiness-poller --context=iac-orchestrator 2>/dev/null || true
+nats consumer rm infraops readiness-poller --force --context=iac-orchestrator 2>/dev/null || true
 nats consumer add infraops readiness-poller \
   --pull --ack=explicit --deliver=new \
   --filter="infraops.helloworld" \
-  --replay=instant --max-deliver=-1 --max-pending=-1 \
+  --replay=instant --max-deliver=-1 --max-pending=-1 --max-ack-pending=-1 \
   --context=iac-orchestrator || true
 
 echo "=== Resetting failure-poller consumer (delete + recreate fresh) ==="
-nats consumer rm infraops failure-poller --context=iac-orchestrator 2>/dev/null || true
+nats consumer rm infraops failure-poller --force --context=iac-orchestrator 2>/dev/null || true
 nats consumer add infraops failure-poller \
   --pull --ack=explicit --deliver=new \
   --filter="infraops.helloworld.fail.>" \
-  --replay=instant --max-deliver=-1 --max-pending=-1 \
+  --replay=instant --max-deliver=-1 --max-pending=-1 --max-ack-pending=-1 \
   --context=iac-orchestrator || true
 
 echo "=== Consumer info ==="
