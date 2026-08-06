@@ -16,12 +16,15 @@
 # filters on that subject so wait-for-readiness.sh can detect a declared
 # failure and halt the production line for forensics.
 #
-# Idempotent: the consumer is deleted (if present) and recreated fresh with
-# --deliver=new so it only sees readiness signals published AFTER this run
-# started. A stale position inherited from a prior/cancelled run would make
-# wait-for-readiness.sh miss a freshly-created VM's signal and falsely reject
-# it, causing the apply/gate loop to cycle. The || true keeps missing or
-# already-existing consumers from failing the run.
+# The consumers are deleted (if present) and recreated fresh with --deliver=new
+# so they only see readiness signals published AFTER this run started. A stale
+# position inherited from a prior/cancelled run would make wait-for-readiness.sh
+# miss a freshly-created VM's signal and falsely reject it, causing the
+# apply/gate loop to cycle. --defaults accepts default values for all remaining
+# prompts so the add works in a non-interactive CI container. The rm keeps
+# || true (a consumer may not exist yet); the add is deliberately NOT
+# swallowed — a missing consumer must fail the step loudly so the gate never
+# runs blind.
 # ===========================================================================
 set -ex
 
@@ -42,16 +45,18 @@ nats consumer rm infraops readiness-poller --force --context=iac-orchestrator 2>
 nats consumer add infraops readiness-poller \
   --pull --ack=explicit --deliver=new \
   --filter="infraops.helloworld" \
-  --replay=instant --max-deliver=-1 --max-pending=-1 --max-ack-pending=-1 \
-  --context=iac-orchestrator || true
+  --replay=instant --max-deliver=-1 --max-pending=-1 --defaults \
+  --context=iac-orchestrator
+nats consumer info infraops readiness-poller --context=iac-orchestrator >/dev/null
 
 echo "=== Resetting failure-poller consumer (delete + recreate fresh) ==="
 nats consumer rm infraops failure-poller --force --context=iac-orchestrator 2>/dev/null || true
 nats consumer add infraops failure-poller \
   --pull --ack=explicit --deliver=new \
   --filter="infraops.helloworld.fail.>" \
-  --replay=instant --max-deliver=-1 --max-pending=-1 --max-ack-pending=-1 \
-  --context=iac-orchestrator || true
+  --replay=instant --max-deliver=-1 --max-pending=-1 --defaults \
+  --context=iac-orchestrator
+nats consumer info infraops failure-poller --context=iac-orchestrator >/dev/null
 
 echo "=== Consumer info ==="
 nats consumer info infraops readiness-poller --context=iac-orchestrator || true
