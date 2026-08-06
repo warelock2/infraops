@@ -131,11 +131,18 @@ jobs:
           args: >
             sh -c "
             mkdir -p ~/.kube &&
-            echo \"\$K8S_ADMIN_KUBECONFIG\" > ~/.kube/config &&
+            echo \"\$ANSIBLE_SSH_PRIVATE_KEY\" > /tmp/ansible_key &&
+            chmod 600 /tmp/ansible_key &&
+            K8S_DOMAIN=\$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
+            CP01=\$(yq -r '.clusters[0].name' conf/infrastructure.yaml) &&
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+              -i /tmp/ansible_key
+              ansible@k8s-\${CP01}-control-01.\${K8S_DOMAIN}
+              'sudo cat /etc/kubernetes/admin.conf' > ~/.kube/config &&
             chmod 600 ~/.kube/config &&
             ansible-playbook ansible/playbooks/k8s-drain-removed-nodes.yaml -i localhost,"
         env:
-          K8S_ADMIN_KUBECONFIG: ${{ secrets.K8S_ADMIN_KUBECONFIG }}
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
 
       - name: Fix Terraform Dir Permissions
         if: github.ref == 'refs/heads/master'
@@ -209,7 +216,9 @@ jobs:
             echo "$ANSIBLE_SSH_PRIVATE_KEY" > /tmp/ansible_key &&
             chmod 600 /tmp/ansible_key &&
             mkdir -p ~/.kube &&
-            echo "$K8S_ADMIN_KUBECONFIG" > ~/.kube/config &&
+            DNS_DOMAIN=$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
+            CP01=$(yq -r '.clusters[0].name' conf/infrastructure.yaml) &&
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /tmp/ansible_key ansible@k8s-${CP01}-control-01.${DNS_DOMAIN} sudo cat /etc/kubernetes/admin.conf > ~/.kube/config &&
             chmod 600 ~/.kube/config &&
             export ANSIBLE_CONFIG=$PWD/ansible/ansible.cfg &&
             SERVICE_HOST=$(yq .defaults.service_host conf/infrastructure.yaml) &&
@@ -232,5 +241,4 @@ jobs:
         env:
           ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
           ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
-          K8S_ADMIN_KUBECONFIG: ${{ secrets.K8S_ADMIN_KUBECONFIG }}
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
