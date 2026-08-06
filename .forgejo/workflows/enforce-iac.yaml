@@ -208,6 +208,9 @@ jobs:
             echo "$ADMIN_SSH_PUBLIC_KEY" > /tmp/ssh_key.pub &&
             echo "$ANSIBLE_SSH_PRIVATE_KEY" > /tmp/ansible_key &&
             chmod 600 /tmp/ansible_key &&
+            mkdir -p ~/.kube &&
+            echo "$K8S_ADMIN_KUBECONFIG" > ~/.kube/config &&
+            chmod 600 ~/.kube/config &&
             export ANSIBLE_CONFIG=$PWD/ansible/ansible.cfg &&
             SERVICE_HOST=$(yq .defaults.service_host conf/infrastructure.yaml) &&
             DNS_DOMAIN=$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
@@ -229,4 +232,5 @@ jobs:
         env:
           ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
           ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
+          K8S_ADMIN_KUBECONFIG: ${{ secrets.K8S_ADMIN_KUBECONFIG }}
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
