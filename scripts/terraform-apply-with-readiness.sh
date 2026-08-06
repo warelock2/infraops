@@ -8,6 +8,7 @@ MAX_RETRIES=3
 READINESS_TIMEOUT=1200
 PLAN_FILE=/tmp/tfplan
 FAILED_VMS_FILE=/tmp/failed_vms.txt
+DECLARED_FAILURES_FILE=/tmp/declared_failed_vms.txt
 
 # ---------------------------------------------------------------------------
 # Extract VMs that Terraform will create or replace from the plan.
@@ -55,6 +56,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
 
   echo "=== Polling for readiness (${READINESS_TIMEOUT}s) ==="
   rm -f "$FAILED_VMS_FILE"
+  rm -f "$DECLARED_FAILURES_FILE"
   if EXPECTED_VMS="$EXPECTED_VMS" scripts/wait-for-readiness.sh "$READINESS_TIMEOUT"; then
     echo "=== ALL VMs READY ==="
     echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -62,9 +64,28 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     exit 0
   fi
 
-  echo "=== Readiness timeout - destroying failed VMs ==="
+  echo "=== Readiness failed - handling botched VMs ==="
   FAILED_VMS=$(cat "$FAILED_VMS_FILE" 2>/dev/null || echo "")
+  DECLARED_FAILURES=$(cat "$DECLARED_FAILURES_FILE" 2>/dev/null || echo "")
+  FAILURE_POLICY=$(yq '.defaults.on_botched_vm_creation // "destroy"' conf/infrastructure.yaml)
+  echo "on_botched_vm_creation: $FAILURE_POLICY"
 
+  ALL_BOTCHED=$(echo "$DECLARED_FAILURES $FAILED_VMS" | tr ' ' '\n' | sed '/^$/d' | tr '\n' ' ')
+
+  if [ "$FAILURE_POLICY" = "preserve" ] && [ -n "$ALL_BOTCHED" ]; then
+    echo "=== PRESERVE MODE: halting production line for forensics ==="
+    for entry in $ALL_BOTCHED; do
+      HOSTNAME="${entry%%:*}"
+      VMID="${entry##*:}"
+      echo "PRESERVING $HOSTNAME (VMID $VMID) - not destroying, left in place for forensics"
+    done
+    echo "ready=false" >> "$GITHUB_OUTPUT"
+    echo "failed_vms=$ALL_BOTCHED" >> "$GITHUB_OUTPUT"
+    exit 1
+  fi
+
+  echo "=== Destroying botched VMs ==="
+  FAILED_VMS="$DECLARED_FAILURES $FAILED_VMS"
   for entry in $FAILED_VMS; do
     HOSTNAME="${entry%%:*}"
     VMID="${entry##*:}"

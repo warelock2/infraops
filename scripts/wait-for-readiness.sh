@@ -6,7 +6,10 @@
 # each freshly-created VM publishes infraops.helloworld once it has booted,
 # run cloud-init, and validated hostname/IP/route/sshd. We consume one
 # message per expected VM; any VM that fails to signal within the timeout is
-# reported via FAILED_VMS (consumed by destroy-failed-vms.sh).
+# reported via FAILED_VMS (consumed by destroy-failed-vms.sh). A VM that
+# declares failure (infraops.helloworld.fail.<host>) halts the wait
+# immediately and is reported via DECLARED_FAILED_VMS so the caller can
+# choose to preserve it for forensics instead of destroying it.
 #
 # EXPECTED_VMS may be provided by the caller (terraform-apply-with-readiness.sh
 # derives it from the Terraform plan — exactly the VMs being created/replaced).
@@ -94,6 +97,25 @@ while true; do
         echo "READY: $HOSTNAME"
         READY_VMS="$READY_VMS $HOSTNAME"
       fi
+    fi
+  done || true
+
+  # A VM that could not be made healthy declares failure via
+  # infraops.helloworld.fail.<host>. That is a stop-the-line event: halt
+  # immediately instead of waiting out the timeout, and record the VM so the
+  # caller can decide (destroy+retry or preserve for forensics).
+  while FAILMSG=$(nats consumer next infraops failure-poller --context=iac-orchestrator --raw --wait=2s 2>/dev/null); do
+    echo "RAW FAIL MSG: $FAILMSG"
+    FHOSTNAME=$(echo "$FAILMSG" | jq -r '.hostname // empty' 2>/dev/null || true)
+    echo "PARSED FAILURE HOSTNAME: '$FHOSTNAME'"
+    if [ -n "$FHOSTNAME" ] && echo "$EXPECTED_VMS" | grep -qw "$FHOSTNAME"; then
+      ENTRY=$(echo "$EXPECTED_VMS" | tr ' ' '\n' | grep "^$FHOSTNAME:" || true)
+      VMID=$(echo "$ENTRY" | cut -d: -f2)
+      echo "DECLARED FAILURE: $FHOSTNAME (VMID $VMID) — halting production line, leaving VM in place"
+      echo "$FHOSTNAME:$VMID" >> /tmp/declared_failed_vms.txt
+      echo "declared_failed_vms=$FHOSTNAME:$VMID" >> "$GITHUB_OUTPUT"
+      echo "ready=false" >> "$GITHUB_OUTPUT"
+      exit 1
     fi
   done || true
 

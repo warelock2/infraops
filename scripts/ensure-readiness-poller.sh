@@ -1,6 +1,6 @@
 #!/bin/sh
 # ===========================================================================
-# Ensure the NATS readiness consumer exists and is wired up.
+# Ensure the NATS readiness and failure consumers exist and are wired up.
 #
 # The readiness handshake works like this: a freshly cloned VM runs
 # helloworld.sh, which validates its own boot and publishes a message to the
@@ -10,6 +10,11 @@
 # readiness-poller that filters on infraops.helloworld. wait-for-readiness.sh
 # then does `nats consumer next infraops readiness-poller` to block until a
 # signal arrives (or times out).
+#
+# A VM that cannot be made healthy publishes a failure message to
+# infraops.helloworld.fail.<host>; a second durable consumer, failure-poller,
+# filters on that subject so wait-for-readiness.sh can detect a declared
+# failure and halt the production line for forensics.
 #
 # Idempotent: consumer add and the info calls use || true so a missing or
 # already-existing consumer doesn't fail the run.
@@ -32,6 +37,13 @@ echo "=== Ensuring readiness-poller consumer exists ==="
 nats consumer add infraops readiness-poller \
   --pull --ack=explicit --deliver=all \
   --filter="infraops.helloworld" \
+  --replay=instant --max-deliver=-1 --max-pending=-1 \
+  --defaults --context=iac-orchestrator || true
+
+echo "=== Ensuring failure-poller consumer exists ==="
+nats consumer add infraops failure-poller \
+  --pull --ack=explicit --deliver=all \
+  --filter="infraops.helloworld.fail.>" \
   --replay=instant --max-deliver=-1 --max-pending=-1 \
   --defaults --context=iac-orchestrator || true
 

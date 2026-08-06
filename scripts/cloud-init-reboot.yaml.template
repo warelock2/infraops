@@ -54,8 +54,11 @@ write_files:
       ACK_PREFIX="infraops.helloworld.ack"
       HOSTINFO="/etc/helloworld/hostinfo.txt"
       MAX_ATTEMPTS=3
-      MAX_REBOOTS=2
-      REBOOT_COUNT_FILE="/var/run/helloworld_reboot_count"
+      MAX_REBOOTS=3
+      REBOOT_SIGNAL_AFTER=2
+      REBOOT_COUNT_FILE="/etc/helloworld/reboot_count"
+      SSH_PROBE_TIMEOUT=5
+      SSH_POLL_WAIT=30
       PUBLISH_INTERVAL=300
       ACK_TIMEOUT=300
 
@@ -94,6 +97,10 @@ write_files:
         sysctl --system
       }
 
+      ssh_banner_up() {
+        timeout "$SSH_PROBE_TIMEOUT" bash -c 'echo | nc 127.0.0.1 22' 2>/dev/null | grep -q '^SSH-2.0-'
+      }
+
       validate_and_heal() {
         local fail=0
         configure_sysctl
@@ -118,11 +125,20 @@ write_files:
           fail=1
         fi
 
-        if ! systemctl is-active sshd > /dev/null 2>&1; then
-          log "sshd not running — starting"
-          systemctl start sshd
-          systemctl enable sshd
-          fail=1
+        if ! ssh_banner_up; then
+          log "ssh banner not received — waiting ${SSH_POLL_WAIT}s"
+          sleep "$SSH_POLL_WAIT"
+        fi
+
+        if ! ssh_banner_up; then
+          log "ssh banner still not received — restarting sshd"
+          systemctl restart sshd 2>/dev/null || true
+          sleep "$SSH_POLL_WAIT"
+        fi
+
+        if ! ssh_banner_up; then
+          log "ssh banner still not received after restart — rebooting"
+          maybe_reboot
         fi
 
         local nats_ok=0
@@ -147,6 +163,13 @@ write_files:
         PAYLOAD="{\"hostname\":\"$AUTH_HOSTNAME\",\"ip\":\"$AUTH_IP\",\"vmid\":\"$AUTH_VMID\",\"timestamp\":\"$TIMESTAMP\"}"
         log "publishing readiness: $PAYLOAD"
         nats pub "$SUBJECT" "$PAYLOAD" --context="$CONTEXT" -J
+      }
+
+      publish_failure() {
+        TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        PAYLOAD="{\"hostname\":\"$AUTH_HOSTNAME\",\"ip\":\"$AUTH_IP\",\"vmid\":\"$AUTH_VMID\",\"status\":\"fail\",\"reason\":\"$1\",\"timestamp\":\"$TIMESTAMP\"}"
+        log "publishing failure: $PAYLOAD"
+        nats pub "infraops.helloworld.fail.$AUTH_HOSTNAME" "$PAYLOAD" --context="$CONTEXT" -J
       }
 
       wait_for_ack() {
@@ -187,10 +210,18 @@ write_files:
         fi
         reboot_count=$((reboot_count + 1))
         echo "$reboot_count" > "$REBOOT_COUNT_FILE"
+
         if [ "$reboot_count" -gt "$MAX_REBOOTS" ]; then
-          log "max reboots ($MAX_REBOOTS) reached — giving up, manual intervention required"
+          log "max reboots ($MAX_REBOOTS) reached — giving up, leaving VM for forensics"
+          publish_failure "gave up after $MAX_REBOOTS reboots: validation still failing"
+          self_destruct
           exit 1
         fi
+
+        if [ "$reboot_count" -ge "$REBOOT_SIGNAL_AFTER" ]; then
+          publish_failure "reboot $reboot_count/$MAX_REBOOTS: validation still failing"
+        fi
+
         log "reboot $reboot_count/$MAX_REBOOTS"
         reboot
       }
