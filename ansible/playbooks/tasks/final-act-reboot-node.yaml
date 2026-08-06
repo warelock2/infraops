@@ -14,7 +14,7 @@
 # that use emptyDir volumes.
 # ===========================================================================
 ---
-- name: Drain k8s node
+- name: Drain k8s node {{ _node }}
   ansible.builtin.command:
     cmd: >-
       kubectl drain {{ _node }}
@@ -24,19 +24,19 @@
   delegate_to: localhost
   become: false
 
-- name: Reboot k8s node
+- name: Reboot k8s node {{ _node }}
   ansible.builtin.reboot:
     reboot_timeout: 600
   delegate_to: "{{ _node }}"
 
-- name: Wait for k8s node to rejoin
+- name: Wait for k8s node {{ _node }} to rejoin
   ansible.builtin.command:
     cmd: kubectl wait --for=condition=Ready node/{{ _node }} --timeout=300s
   delegate_to: localhost
   become: false
   changed_when: false
 
-- name: Wait for etcd static pod on control plane node
+- name: Wait for etcd static pod on control plane node {{ _node }}
   ansible.builtin.command:
     cmd: kubectl wait --for=condition=Ready pod/etcd-{{ _node }} -n kube-system --timeout=300s
   delegate_to: localhost
@@ -44,7 +44,7 @@
   changed_when: false
   when: _node in groups.get('k8s_control', [])
 
-- name: Uncordon k8s node
+- name: Uncordon k8s node {{ _node }}
   ansible.builtin.command:
     cmd: kubectl uncordon {{ _node }}
   delegate_to: localhost
