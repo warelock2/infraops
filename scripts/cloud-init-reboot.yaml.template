@@ -7,15 +7,23 @@
 # it attaches this snippet (filled in by ansible/create-proxmox-snippet.sh,
 # which substitutes __NATS_VM_PASSWORD__). What happens:
 #
-#   1. runcmd fixes the netplan interface name to the real NIC, writes
+#   1. runcmd arms the reboot flag (/var/run/reboot-required), writes
 #      /etc/helloworld/hostinfo.txt (hostname/ip/vm_id from the system),
 #      then starts helloworld.service.
-#   2. helloworld.sh waits for cloud-init, validates hostname/IP/route/sshd/
-#      NATS (healing what it can), and ONLY THEN publishes
+#   2. helloworld.sh waits for cloud-init; if the reboot flag is present it
+#      reboots first (a clean reboot re-registers DHCP/DNS and re-runs
+#      cloud-init). Otherwise it validates hostname/IP/route/sshd/NATS
+#      (healing what it can), and ONLY THEN publishes
 #      infraops.helloworld on NATS.
 #   3. The CI orchestrator consumes that signal (wait-for-readiness.sh) and
 #      replies on the ack subject. On ack, the service self-destructs —
 #      the VM is now a normal machine Ansible can manage.
+#
+# The NIC name is never manipulated: the cloudimg + Proxmox procedure
+# naturally produces "eth0", pinned by cloud-init's netplan config via MAC
+# (match: macaddress + set-name: eth0 -> systemd .link Name=eth0). That pin
+# is deterministic and stable across reboots, so we standardize on eth0 and
+# leave netplan alone.
 #
 # Validation failures trigger a reboot (maybe_reboot) up to MAX_REBOOTS;
 # this is the "reboot dance" the Ansible plays no longer need to poll for.
@@ -56,6 +64,7 @@ write_files:
       MAX_ATTEMPTS=3
       MAX_REBOOTS=3
       REBOOT_SIGNAL_AFTER=2
+      REBOOT_FLAG="/var/run/reboot-required"
       REBOOT_COUNT_FILE="/etc/helloworld/reboot_count"
       SSH_PROBE_TIMEOUT=5
       SSH_POLL_WAIT=30
@@ -213,13 +222,13 @@ write_files:
 
         if [ "$reboot_count" -gt "$MAX_REBOOTS" ]; then
           log "max reboots ($MAX_REBOOTS) reached — giving up, leaving VM for forensics"
-          publish_failure "gave up after $MAX_REBOOTS reboots: validation still failing"
+          publish_failure "gave up after $MAX_REBOOTS reboots: system not ready"
           self_destruct
           exit 1
         fi
 
         if [ "$reboot_count" -ge "$REBOOT_SIGNAL_AFTER" ]; then
-          publish_failure "reboot $reboot_count/$MAX_REBOOTS: validation still failing"
+          publish_failure "reboot $reboot_count/$MAX_REBOOTS: system not ready"
         fi
 
         log "reboot $reboot_count/$MAX_REBOOTS"
@@ -230,6 +239,17 @@ write_files:
       log "starting"
       wait_for_cloud_init || exit 1
       read_auth_facts
+
+      # FIRST ACTION: honor a pending reboot before doing anything else. A
+      # fresh cloud-init pass may have set /var/run/reboot-required (e.g. a
+      # package/kernel upgrade needing a reboot). Reboot now — a clean reboot
+      # re-registers DHCP/DNS and re-runs cloud-init, which usually makes
+      # everything else just work. The flag lives in tmpfs, so it is cleared
+      # by the reboot itself and cannot trigger a loop.
+      if [ -f "$REBOOT_FLAG" ]; then
+        log "reboot flag present ($REBOOT_FLAG) — rebooting before any validation"
+        maybe_reboot
+      fi
 
       validation_ok=0
       for attempt in $(seq 1 $MAX_ATTEMPTS); do
@@ -290,23 +310,14 @@ write_files:
       }
     permissions: "0600"
 
-  # Per-boot netplan interface-name fix. The bpg/proxmox provider seeds the
-  # cloud-init network config with a hardcoded interface name of "eth0", but
-  # Ubuntu's predictable interface naming (ens18) renames the NIC, so the
-  # static IP never binds after the first boot. The once-per-instance runcmd
-  # below fixes first boot; this script runs on EVERY boot (cloud-init final
-  # stage) so the fix survives the netplan re-render cloud-init does on each
-  # subsequent boot. Standardizes on the real interface (ens18) instead of
-  # fighting predictable naming.
-  - path: /var/lib/cloud/scripts/per-boot/00-fix-netplan.sh
-    content: |
-      #!/bin/bash
-      ACTUAL_IF=$(ip route show default | awk '{print $5}' | head -1)
-      sed -i "s/eth0/$ACTUAL_IF/g" /etc/netplan/50-cloud-init.yaml
-      sed -i '/match:/,+1d' /etc/netplan/50-cloud-init.yaml
-      sed -i '/set-name:/d' /etc/netplan/50-cloud-init.yaml
-      netplan apply
-    permissions: "0755"
+  # NOTE: no per-boot netplan fix. The cloudimg + Proxmox procedure naturally
+  # names the NIC "eth0" and cloud-init renders a netplan config that pins it
+  # by MAC (match: macaddress + set-name: eth0 -> systemd .link Name=eth0).
+  # That pin is deterministic and stable across reboots, so there is nothing
+  # to reconcile on every boot. Previous versions renamed eth0->$ACTUAL_IF and
+  # stripped the match:/set-name: blocks, which deleted the .link pin and let
+  # udev's NamePolicy flap the NIC name (ens18 <-> eth0) after boot — never do
+  # that again. Standardize on eth0.
 
 bootcmd:
   - swapoff -a
@@ -316,12 +327,7 @@ runcmd:
   - systemctl enable --now qemu-guest-agent
   - chmod +x /usr/local/bin/helloworld.sh
   - mkdir -p /etc/helloworld
-  - >
-    ACTUAL_IF=$(ip route show default | awk '{print $5}' | head -1) &&
-    sed -i "s/eth0/$ACTUAL_IF/g" /etc/netplan/50-cloud-init.yaml &&
-    sed -i '/match:/,+1d' /etc/netplan/50-cloud-init.yaml &&
-    sed -i '/set-name:/d' /etc/netplan/50-cloud-init.yaml &&
-    netplan apply
+  - touch /var/run/reboot-required
   - >
     AUTH_HOSTNAME=$(hostname) &&
     AUTH_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -1) &&
