@@ -197,42 +197,7 @@ jobs:
         if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_config_management == 'true' && steps.apply-wait.outputs.ready == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: >
-            sh -c '
-            if [ -z "$ADMIN_SSH_PUBLIC_KEY" ]; then echo "ERROR: ADMIN_SSH_PUBLIC_KEY not set" && exit 1; fi &&
-            if [ -z "$ANSIBLE_SSH_PRIVATE_KEY" ]; then echo "ERROR: ANSIBLE_SSH_PRIVATE_KEY not set" && exit 1; fi &&
-            export VAULT_ADDR=https://vault.afobl.com &&
-            export VAULT_SKIP_VERIFY=true &&
-            NTFY_CHANNEL=$(vault kv get -field=message_channel_phone secret/infraops/ntfy) &&
-            K8S_VERSION=$(yq .platform.kubernetes.version conf/infrastructure.yaml) &&
-            BAKED_KUBECTL=$(kubectl version --client -o yaml | yq .clientVersion.gitVersion) &&
-            case "$BAKED_KUBECTL" in *"$K8S_VERSION"*) ;; *)
-              echo "ERROR: config k8s version $K8S_VERSION != baked kubectl $BAKED_KUBECTL; rebuild ci-base (KUBECTL_VERSION ARG)" && exit 1;;
-            esac &&
-            echo "$ADMIN_SSH_PUBLIC_KEY" > /tmp/ssh_key.pub &&
-            echo "$ANSIBLE_SSH_PRIVATE_KEY" > /tmp/ansible_key &&
-            chmod 600 /tmp/ansible_key &&
-            mkdir -p ~/.kube &&
-            DNS_DOMAIN=$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
-            if [ "$(yq '.clusters | length' conf/infrastructure.yaml)" -gt 0 ]; then CP01=$(yq -r '.clusters[0].name' conf/infrastructure.yaml) && ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /tmp/ansible_key ansible@k8s-${CP01}-control-01.${DNS_DOMAIN} sudo cat /etc/kubernetes/admin.conf > ~/.kube/config && chmod 600 ~/.kube/config; else echo "No clusters in infrastructure.yaml - skipping kubeconfig fetch"; fi &&
-            export ANSIBLE_CONFIG=$PWD/ansible/ansible.cfg &&
-            SERVICE_HOST=$(yq .defaults.service_host conf/infrastructure.yaml) &&
-            DNS_DOMAIN=$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
-            SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}" &&
-            GIT_COMMIT="${GITHUB_SHA::8}" &&
-            GIT_TAG="${GITHUB_REF_NAME}" &&
-            ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml
-            --private-key /tmp/ansible_key
-            -e infra_platform_kubernetes_version=$(yq .platform.kubernetes.version conf/infrastructure.yaml)
-            -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr conf/infrastructure.yaml)
-            -e infra_platform_kubernetes_calico_version=$(yq .platform.kubernetes.calico_version conf/infrastructure.yaml)
-            -e infra_service_domain=$SERVICE_DOMAIN
-            -e infra_admin_user=$(yq .platform.admin.user conf/infrastructure.yaml)
-            -e infra_admin_group=$(yq .platform.admin.group conf/infrastructure.yaml)
-            -e infra_ssh_key_file=/tmp/ssh_key.pub
-            -e git_commit=$GIT_COMMIT
-            -e git_tag=$GIT_TAG
-            -e ntfy_message_channel=$NTFY_CHANNEL'
+          args: sh scripts/configuration-management.sh
         env:
           ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
           ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
