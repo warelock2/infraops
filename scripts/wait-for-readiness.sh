@@ -72,6 +72,13 @@ READY_VMS=""
 START_TIME=$(date +%s)
 TIMEOUT=$READINESS_TIMEOUT
 
+echo "=== Pre-flight: readiness-poller consumer must exist ==="
+if ! nats consumer info infraops readiness-poller --context=iac-orchestrator >/dev/null 2>&1; then
+  echo "ERROR: readiness-poller consumer does not exist in stream 'infraops'."
+  echo "The orchestrator cannot receive VM readiness signals without it."
+  echo "Ensure ensure-readiness-poller.sh ran successfully before this step."
+  exit 1
+fi
 echo "=== Consumer info before polling ==="
 nats consumer info infraops readiness-poller --context=iac-orchestrator 2>&1 || true
 
