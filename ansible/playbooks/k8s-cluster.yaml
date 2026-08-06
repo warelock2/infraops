@@ -482,7 +482,7 @@
     - name: Share worker and control-plane join commands
       ansible.builtin.set_fact:
         k8s_join_command: "kubeadm join {{ cp_endpoint }} --token {{ join_command.stdout | regex_search('(?<=--token )[^ ]+') }} --discovery-token-ca-cert-hash {{ join_command.stdout | regex_search('(?<=--discovery-token-ca-cert-hash )[^ ]+') }}"
-        k8s_cp_join_command: "kubeadm join {{ cp_endpoint }} --token {{ join_command.stdout | regex_search('(?<=--token )[^ ]+') }} --discovery-token-ca-cert-hash {{ join_command.stdout | regex_search('(?<=--discovery-token-ca-cert-hash )[^ ]+') }} --control-plane --certificate-key {{ cert_key_raw.stdout | regex_search('[a-f0-9]{64}') }}"
+        k8s_cp_join_command: "kubeadm join {{ cp_endpoint }} --token {{ join_command.stdout | regex_search('(?<=--token )[^ ]+') }} --discovery-token-ca-cert-hash {{ join_command.stdout | regex_search('(?<=--discovery-token-ca-cert-hash )[^ ]+') }} --control-plane --certificate-key {{ cert_key_raw.stdout | regex_search('[a-f0-9]{64}') }} --apiserver-bind-port 6444"
       when: inventory_hostname == cp_leader
 
 # ---------------------------------------------------------------------------
