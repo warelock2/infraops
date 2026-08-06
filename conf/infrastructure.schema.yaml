@@ -158,6 +158,11 @@ properties:
         enum: [docker_compose, helm, systemd, nomad_job, ecs_service]
         default: docker_compose
         description: Default service deployment method
+      on_botched_vm_creation:
+        type: string
+        enum: [destroy, preserve]
+        default: destroy
+        description: "How the orchestrator handles a VM whose creation went wrong: 'destroy' (default) tears it down and retries the apply; 'preserve' halts the production line and keeps the VM for forensics"
       service_host:
         type: string
         minLength: 1
