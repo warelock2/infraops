@@ -2,8 +2,8 @@
 # ===========================================================================
 # Deploy the rendered cloud-init snippet to the Proxmox snippets directory.
 #
-# create-proxmox-snippet.sh (under ansible/) produces a filled snippet with
-# secrets substituted from Vault; this script pushes that file onto the
+# Fetches scripts/cloud-init-reboot.yaml.template from the git repo, fills in
+# __NATS_VM_PASSWORD__ from Vault, and pushes the rendered snippet onto the
 # Proxmox node so the template/VMs can reference it (vendor-data). Needs a
 # Vault token to resolve secrets — read from VAULT_TOKEN, pass, or
 # ~/.vault-token (in that order).
