@@ -435,6 +435,8 @@ resource "proxmox_virtual_environment_vm" "standalone" {
   node_name = local.proxmox_target_node
   vm_id     = local.standalone_vm_ids[each.key]
 
+  tags = ["ghost-test"]
+
   lifecycle {
     precondition {
       condition     = local.standalone_vm_ids[each.key] > 0
