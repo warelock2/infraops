@@ -127,7 +127,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
-pip install -r ansible/requirements.txt
+pip install -r requirements.txt
 
 # Install Ansible collections
 ansible-galaxy collection install -r ansible/requirements.yaml
