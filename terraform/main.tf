@@ -202,6 +202,15 @@ locals {
   linked_clone        = try(local.infra.platform.proxmox.linked_clone, false)
   gateway             = local.infra.defaults.gateway
 
+  # IaC DNS allocation pool — the authoritative IP range for VM static
+  # addresses. Declared on the host running the DNS service (infrastructure.yaml
+  # ip_pool). dns-lookup.sh prefers answers inside this range so a DHCP lease
+  # registration or other foreign record can never outrank the IaC allocation.
+  dns_ip_pool = try([
+    for h in tolist(try(local.infra.hosts, [])) : h.ip_pool
+    if contains(try(h.services, []), "dns")
+  ][0], { start = "", end = "" })
+
   # VM ID validation — collected before any resource is created.
   all_vm_ids = concat(
     [for n in local.node_list : n.vm_id if n.vm_id > 0],
@@ -272,7 +281,7 @@ resource "terraform_data" "dns_alloc" {
 data "external" "dns_lookup" {
   for_each   = local.vms
   depends_on = [terraform_data.dns_alloc]
-  program    = ["sh", "${path.root}/../scripts/dns-lookup.sh", "${each.key}.${local.dns_domain}"]
+  program    = ["sh", "${path.root}/../scripts/dns-lookup.sh", "${each.key}.${local.dns_domain}", local.dns_ip_pool.start, local.dns_ip_pool.end]
 }
 
 # ===========================================================================
@@ -403,7 +412,7 @@ resource "terraform_data" "standalone_dns_alloc" {
 data "external" "standalone_dns_lookup" {
   for_each   = local.standalone_hosts_provision
   depends_on = [terraform_data.standalone_dns_alloc]
-  program    = ["sh", "${path.root}/../scripts/dns-lookup.sh", "${each.key}.${local.dns_domain}"]
+  program    = ["sh", "${path.root}/../scripts/dns-lookup.sh", "${each.key}.${local.dns_domain}", local.dns_ip_pool.start, local.dns_ip_pool.end]
 }
 
 # Standalone host VM ID allocation
