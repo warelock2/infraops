@@ -1,2 +1,4 @@
 PyYAML==6.0.1
 git-filter-repo==2.47.0
+hvac==2.4.0
+pfsense-vshell==2.2.4

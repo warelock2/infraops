@@ -1,0 +1,157 @@
+---
+# DHCP lease cleanup for hosts that should be static-only in the IAC pool.
+#
+# Problem: a VM that was handed a DHCP-pool address (e.g. during a brief
+# DHCP window before cloud-init applied its static netplan, or a previous
+# incarnation of the VM) leaves behind a DHCP lease on pfSense. The DHCP
+# registration is what makes DNS resolve the hostname to the offending IP,
+# and that stale answer outlives the lease's usefulness — and can confuse
+# dns-lookup.sh even after we fixed it to prefer in-pool answers.
+#
+# Strategy (per target IP):
+#   1. Flush the LOCAL DNS cache on the system doing lookups. The DNS
+#      resolver service on pfSense follows DHCP — once the lease is gone
+#      its DNS registration goes too — but the lookup system's own cache
+#      keeps serving the stale answer until its TTL expires. Flushing that
+#      cache is what actually clears the offending record from the client.
+#   2. Re-resolve the hostname. If the offending IP no longer appears, the
+#      lease (and its registration) is already gone — nothing to delete.
+#   3. If the IP still resolves, delete the lease from pfSense via the
+#      REST API: DELETE /api/v2/status/dhcp_server/leases with the target
+#      IP in the request body (the body becomes the query param that
+#      targets the lease).
+#   4. Flush the DNS cache again so subsequent lookups are fresh.
+#
+# Usage:
+#   VAULT_TOKEN=hvs.xxx ansible-playbook manage-iac-dhcp.yaml \
+#     -e "target_ip=192.168.0.124" \
+#     -e "target_hostname=test01"
+#
+# Comma-separated lists are allowed for both (hostname may be a single
+# value broadcast to all IPs):
+#   -e "target_ip=192.168.0.124,192.168.0.125" -e "target_hostname=test01"
+#
+# If target_hostname is omitted the DNS gate is skipped and every target IP
+# is deleted unconditionally (verification still confirms the lease is gone).
+
+# ---------------------------------------------------------------------------
+# Play 1 — Parse the request and load infra/Vault context.
+#
+# All on localhost: validate target_ip/target_hostname, pair each IP with a
+# hostname for the DNS gate, then read infrastructure.yaml + the pfSense API
+# key from Vault. This play only sets up state for the second play.
+# ---------------------------------------------------------------------------
+- name: Setup — read infrastructure and get API key
+  hosts: localhost
+  gather_facts: no
+  vars:
+    ansible_python_interpreter: /home/warelock/projects/infraops/.venv/bin/python
+  tasks:
+    - name: Validate target_ip parameter
+      ansible.builtin.assert:
+        that: target_ip is defined and target_ip | length > 0
+        fail_msg: "target_ip parameter is required. Example: -e \"target_ip=192.168.0.124\""
+
+    - name: Parse target IPs
+      ansible.builtin.set_fact:
+        target_ips: "{{ target_ip | split(',') | map('trim') | list }}"
+
+    - name: Validate each target IP
+      ansible.builtin.assert:
+        that: item is match('^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$')
+        fail_msg: "Invalid IP address '{{ item }}'"
+      loop: "{{ target_ips }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Parse target hostnames
+      ansible.builtin.set_fact:
+        target_hostnames: "{{ target_hostname | default('') | split(',') | map('trim') | reject('equalto', '') | list }}"
+
+    - name: Pair each IP with a hostname
+      ansible.builtin.set_fact:
+        targets_raw: >-
+          {% set ns = namespace(pairs=[]) %}
+          {% set hlist = target_hostnames %}
+          {% for ip in target_ips %}
+          {% set hn = hlist[loop.index0] if hlist | length > 1 else (hlist[0] if hlist | length == 1 else '') %}
+          {% set _ = ns.pairs.append({'ip': ip, 'hostname': hn}) %}
+          {% endfor %}
+          {{ ns.pairs | to_json }}
+
+    - name: Set parsed targets
+      ansible.builtin.set_fact:
+        targets: "{{ targets_raw | trim | from_json }}"
+
+    - name: Read infrastructure.yaml
+      ansible.builtin.slurp:
+        src: "{{ playbook_dir }}/../../conf/infrastructure.yaml"
+      register: infra_raw
+
+    - name: Parse infrastructure.yaml
+      ansible.builtin.set_fact:
+        infra: "{{ infra_raw.content | b64decode | from_yaml }}"
+
+    - name: Find DHCP server entry
+      ansible.builtin.set_fact:
+        dhcp_entry: "{{ infra.hosts | selectattr('services', 'defined') | selectattr('services', 'contains', 'dhcp') | first }}"
+
+    - name: Set pfSense API connection vars
+      ansible.builtin.set_fact:
+        pfsense_host: "{{ dhcp_entry.connection.host }}"
+        dns_domain: "{{ infra.platform.proxmox.dns_domain | default('localdomain') }}"
+
+    - name: Find docker host entry
+      ansible.builtin.set_fact:
+        docker_host: "{{ infra.hosts | selectattr('name', 'equalto', 'docker') | first }}"
+
+    - name: Find vault service port
+      ansible.builtin.set_fact:
+        vault_port: "{{ (infra.services.instances.vault | first).port }}"
+
+    - name: Set vault URL
+      ansible.builtin.set_fact:
+        vault_url: "https://{{ docker_host.connection.host }}:{{ vault_port }}"
+
+    - name: Get pfSense API key from Vault
+      community.hashi_vault.vault_kv2_get:
+        url: "{{ vault_url }}"
+        path: infraops/pfsense
+        validate_certs: false
+      register: vault_pfsense
+
+    - name: Set pfSense API key
+      ansible.builtin.set_fact:
+        pfsense_api_key: "{{ vault_pfsense.secret.api_key }}"
+
+# ---------------------------------------------------------------------------
+# Play 2 — Flush → check → conditionally delete each offending lease.
+#
+# hostvars['localhost'][...] pulls the facts set in Play 1 (facts do not
+# survive between plays, but hostvars do).
+# ---------------------------------------------------------------------------
+- name: Delete stale DHCP leases
+  hosts: localhost
+  gather_facts: no
+  vars:
+    ansible_python_interpreter: /home/warelock/projects/infraops/.venv/bin/python
+    pfsense_api_key: "{{ hostvars['localhost']['pfsense_api_key'] }}"
+    pfsense_host: "{{ hostvars['localhost']['pfsense_host'] }}"
+    dns_domain: "{{ hostvars['localhost']['dns_domain'] }}"
+    targets: "{{ hostvars['localhost']['targets'] }}"
+  tasks:
+    - name: Flush local DNS cache
+      ansible.builtin.command: resolvectl flush-caches
+      changed_when: false
+      register: flush_result
+
+    - name: Execute per-IP lease cleanup
+      ansible.builtin.include_tasks: tasks/delete-lease.yaml
+      loop: "{{ targets }}"
+      loop_control:
+        loop_var: target_item
+        label: "{{ target_item.ip }}{% if target_item.hostname %}({{ target_item.hostname }}){% endif %}"
+
+    - name: Flush local DNS cache again
+      ansible.builtin.command: resolvectl flush-caches
+      changed_when: false
