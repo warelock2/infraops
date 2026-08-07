@@ -85,7 +85,26 @@ write_files:
       wait_for_cloud_init() {
         log "waiting for cloud-init to finish..."
         local count=0
-        while ! test -f /var/lib/cloud/instance/boot-finished; do
+        # Ask cloud-init itself, not the /var/lib/cloud/.../boot-finished
+        # marker. That file persists across the reboot dance (it is written at
+        # the end of a cloud-init pass but never cleared at boot), so a marker
+        # check can pass while cloud-init is still mid-run. `cloud-init status`
+        # reflects the CURRENT pass: it prints "status: done" only once the
+        # running stage has completed. "status: error" means the pass failed
+        # and helloworld must not signal readiness.
+        while true; do
+          local ci_status
+          ci_status=$(cloud-init status 2>/dev/null | grep -oP 'status: \K\w+' || true)
+          case "$ci_status" in
+            done)
+              log "cloud-init finished"
+              return 0
+              ;;
+            error)
+              log "cloud-init reported an error"
+              return 1
+              ;;
+          esac
           sleep 5
           count=$((count + 1))
           if [ $count -ge 120 ]; then
@@ -93,7 +112,6 @@ write_files:
             return 1
           fi
         done
-        log "cloud-init finished"
       }
 
       configure_sysctl() {
