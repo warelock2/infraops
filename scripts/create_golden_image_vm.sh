@@ -40,8 +40,10 @@ rm -rf /tmp/nats.zip "/tmp/nats-${NATS_CLI_VERSION}-linux-amd64"
 # --- Use the cloudimg as an unmodified template so we only modify the goldenimg file ---
 cp "$IMG_DIR/$CLOUDIMG_FILE" "$IMG_DIR/$GOLDENIMG_FILE"
 
-# --- Inject nats CLI into golden image (no boot required) ---
+# --- Inject nats CLI and isc-dhcp-client into golden image (no boot required) ---
 virt-customize -a "$IMG_DIR/$GOLDENIMG_FILE" \
+  --network \
+  --install isc-dhcp-client \
   --mkdir /usr/local/bin \
   --upload /tmp/nats:/usr/local/bin/nats \
   --chmod 0755:/usr/local/bin/nats

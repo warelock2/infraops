@@ -1,45 +1,36 @@
 ---
-# DHCP lease cleanup for hosts that should be static-only in the IAC pool.
+# DHCP ghost-lease cleanup driven by DNS.
 #
-# Problem: a VM that was handed a DHCP-pool address (e.g. during a brief
-# DHCP window before cloud-init applied its static netplan, or a previous
-# incarnation of the VM) leaves behind a DHCP lease on pfSense. The DHCP
-# registration is what makes DNS resolve the hostname to the offending IP,
-# and that stale answer outlives the lease's usefulness — and can confuse
-# dns-lookup.sh even after we fixed it to prefer in-pool answers.
+# Problem: a VM that should be static-only in the IaC pool may briefly hold a
+# DHCP lease (a short DHCP window before cloud-init applies its static netplan,
+# or a previous incarnation of the VM). The DHCP registration makes pfSense's
+# resolver answer the hostname with that extra IP, and the stale answer outlives
+# the lease — polluting DNS and confusing dns-lookup.sh.
 #
-# Strategy (per target IP):
-#   1. Flush the LOCAL DNS cache on the system doing lookups. The DNS
-#      resolver service on pfSense follows DHCP — once the lease is gone
-#      its DNS registration goes too — but the lookup system's own cache
-#      keeps serving the stale answer until its TTL expires. Flushing that
-#      cache is what actually clears the offending record from the client.
-#   2. Re-resolve the hostname. If the offending IP no longer appears, the
-#      lease (and its registration) is already gone — nothing to delete.
-#   3. If the IP still resolves, delete the lease from pfSense via the
-#      REST API: DELETE /api/v2/status/dhcp_server/leases with the target
-#      IP in the request body (the body becomes the query param that
-#      targets the lease).
-#   4. Flush the DNS cache again so subsequent lookups are fresh.
+# Strategy: DNS is the authoritative source of truth. We do not trust the DHCP
+# lease table (it accumulates expired historical entries that never resolve).
+# Instead, per hostname:
+#   1. Flush the LOCAL DNS cache so we get a genuinely fresh answer.
+#   2. Resolve the hostname and collect every IP it answers with.
+#   3. Ghosts are the resolved IPs that are NOT the expected static answer:
+#      by default anything outside the IaC pool range; if `static_ip` is given,
+#      anything other than that exact address.
+#   4. If no ghosts, report clean and stop.
+#   5. Otherwise DELETE each ghost lease via the pfSense REST API, then POST the
+#      DHCP apply endpoint so the change actually lands.
+#   6. Wait a few seconds, flush the cache again, and re-resolve: the ghost IPs
+#      must be gone and only the expected static answer may remain.
 #
 # Usage:
 #   VAULT_TOKEN=hvs.xxx ansible-playbook manage-iac-dhcp.yaml \
-#     -e "target_ip=192.168.0.124" \
 #     -e "target_hostname=test01"
 #
-# Comma-separated lists are allowed for both (hostname may be a single
-# value broadcast to all IPs):
-#   -e "target_ip=192.168.0.124,192.168.0.125" -e "target_hostname=test01"
-#
-# If target_hostname is omitted the DNS gate is skipped and every target IP
-# is deleted unconditionally (verification still confirms the lease is gone).
+# Optional override (treats ONLY this address as valid; ignores the pool):
+#   ... -e "target_hostname=test01" -e "static_ip=192.168.0.40"
 
 # ---------------------------------------------------------------------------
-# Play 1 — Parse the request and load infra/Vault context.
-#
-# All on localhost: validate target_ip/target_hostname, pair each IP with a
-# hostname for the DNS gate, then read infrastructure.yaml + the pfSense API
-# key from Vault. This play only sets up state for the second play.
+# Play 1 — Validate input and load infra/Vault context.
+# All on localhost: this play only sets up state for the second play.
 # ---------------------------------------------------------------------------
 - name: Setup — read infrastructure and get API key
   hosts: localhost
@@ -47,41 +38,10 @@
   vars:
     ansible_python_interpreter: /home/warelock/projects/infraops/.venv/bin/python
   tasks:
-    - name: Validate target_ip parameter
+    - name: Validate target_hostname parameter
       ansible.builtin.assert:
-        that: target_ip is defined and target_ip | length > 0
-        fail_msg: "target_ip parameter is required. Example: -e \"target_ip=192.168.0.124\""
-
-    - name: Parse target IPs
-      ansible.builtin.set_fact:
-        target_ips: "{{ target_ip | split(',') | map('trim') | list }}"
-
-    - name: Validate each target IP
-      ansible.builtin.assert:
-        that: item is match('^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$')
-        fail_msg: "Invalid IP address '{{ item }}'"
-      loop: "{{ target_ips }}"
-      loop_control:
-        label: "{{ item }}"
-
-    - name: Parse target hostnames
-      ansible.builtin.set_fact:
-        target_hostnames: "{{ target_hostname | default('') | split(',') | map('trim') | reject('equalto', '') | list }}"
-
-    - name: Pair each IP with a hostname
-      ansible.builtin.set_fact:
-        targets_raw: >-
-          {% set ns = namespace(pairs=[]) %}
-          {% set hlist = target_hostnames %}
-          {% for ip in target_ips %}
-          {% set hn = hlist[loop.index0] if hlist | length > 1 else (hlist[0] if hlist | length == 1 else '') %}
-          {% set _ = ns.pairs.append({'ip': ip, 'hostname': hn}) %}
-          {% endfor %}
-          {{ ns.pairs | to_json }}
-
-    - name: Set parsed targets
-      ansible.builtin.set_fact:
-        targets: "{{ targets_raw | trim | from_json }}"
+        that: target_hostname is defined and target_hostname | length > 0
+        fail_msg: "target_hostname parameter is required. Example: -e \"target_hostname=test01\""
 
     - name: Read infrastructure.yaml
       ansible.builtin.slurp:
@@ -96,10 +56,9 @@
       ansible.builtin.set_fact:
         dhcp_entry: "{{ infra.hosts | selectattr('services', 'defined') | selectattr('services', 'contains', 'dhcp') | first }}"
 
-    - name: Set pfSense API connection vars
+    - name: Find firewall entry with IaC DNS pool
       ansible.builtin.set_fact:
-        pfsense_host: "{{ dhcp_entry.connection.host }}"
-        dns_domain: "{{ infra.platform.proxmox.dns_domain | default('localdomain') }}"
+        firewall_entry: "{{ infra.hosts | selectattr('ip_pool', 'defined') | first }}"
 
     - name: Find docker host entry
       ansible.builtin.set_fact:
@@ -108,6 +67,15 @@
     - name: Find vault service port
       ansible.builtin.set_fact:
         vault_port: "{{ (infra.services.instances.vault | first).port }}"
+
+    - name: Set pfSense API connection vars
+      ansible.builtin.set_fact:
+        pfsense_host: "{{ dhcp_entry.connection.host }}"
+        pfsense_api_key: ""
+        dns_domain: "{{ infra.platform.proxmox.dns_domain | default('localdomain') }}"
+        pool_start: "{{ firewall_entry.ip_pool.start }}"
+        pool_end: "{{ firewall_entry.ip_pool.end }}"
+        target_fqdn: "{{ target_hostname if '.' in target_hostname else target_hostname + '.' + (infra.platform.proxmox.dns_domain | default('localdomain')) }}"
 
     - name: Set vault URL
       ansible.builtin.set_fact:
@@ -125,33 +93,124 @@
         pfsense_api_key: "{{ vault_pfsense.secret.api_key }}"
 
 # ---------------------------------------------------------------------------
-# Play 2 — Flush → check → conditionally delete each offending lease.
+# Play 2 — DNS-first ghost detection and cleanup.
 #
 # hostvars['localhost'][...] pulls the facts set in Play 1 (facts do not
 # survive between plays, but hostvars do).
 # ---------------------------------------------------------------------------
-- name: Delete stale DHCP leases
+- name: Detect and delete ghost DHCP leases via DNS
   hosts: localhost
   gather_facts: no
   vars:
     ansible_python_interpreter: /home/warelock/projects/infraops/.venv/bin/python
     pfsense_api_key: "{{ hostvars['localhost']['pfsense_api_key'] }}"
     pfsense_host: "{{ hostvars['localhost']['pfsense_host'] }}"
+    target_fqdn: "{{ hostvars['localhost']['target_fqdn'] }}"
     dns_domain: "{{ hostvars['localhost']['dns_domain'] }}"
-    targets: "{{ hostvars['localhost']['targets'] }}"
+    pool_start: "{{ hostvars['localhost']['pool_start'] }}"
+    pool_end: "{{ hostvars['localhost']['pool_end'] }}"
   tasks:
-    - name: Flush local DNS cache
+    - name: Flush local DNS cache for a fresh query
       ansible.builtin.command: resolvectl flush-caches
       changed_when: false
-      register: flush_result
 
-    - name: Execute per-IP lease cleanup
+    - name: Resolve hostname (fresh)
+      ansible.builtin.command: "getent hosts {{ target_fqdn }}"
+      changed_when: false
+      failed_when: false
+      register: dns_before
+
+    - name: Collect resolved IPs
+      ansible.builtin.set_fact:
+        resolved_ips: "{{ dns_before.stdout_lines | default([]) | map('split') | map('first') | list }}"
+
+    - name: Compute ghost IPs
+      ansible.builtin.set_fact:
+        ghost_ips: "{{ ghost_ips_json | from_json }}"
+      vars:
+        ghost_ips_json: >-
+          {%- set ns = namespace(ghosts=[]) -%}
+          {%- if static_ip | default('') | length > 0 -%}
+          {%- for ip in resolved_ips -%}
+          {%- if ip != static_ip -%}
+          {%- set _ = ns.ghosts.append(ip) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- else -%}
+          {%- set sp = pool_start.split('.') -%}
+          {%- set ep = pool_end.split('.') -%}
+          {%- set start_int = (sp[0]|int * 16777216) + (sp[1]|int * 65536) + (sp[2]|int * 256) + (sp[3]|int) -%}
+          {%- set end_int = (ep[0]|int * 16777216) + (ep[1]|int * 65536) + (ep[2]|int * 256) + (ep[3]|int) -%}
+          {%- for ip in resolved_ips -%}
+          {%- set pp = ip.split('.') -%}
+          {%- set ip_int = (pp[0]|int * 16777216) + (pp[1]|int * 65536) + (pp[2]|int * 256) + (pp[3]|int) -%}
+          {%- if ip_int < start_int or ip_int > end_int -%}
+          {%- set _ = ns.ghosts.append(ip) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- endif -%}
+          {{ ns.ghosts | to_json }}
+
+    - name: Show DNS state and detected ghosts
+      ansible.builtin.debug:
+        msg:
+          - "target: {{ target_fqdn }}"
+          - "resolved before: {{ resolved_ips | default([], true) }}"
+          - "pool: {{ pool_start }} - {{ pool_end }}"
+          - "ghosts: {{ ghost_ips }}"
+
+    - name: Report clean when no ghosts are polluting DNS
+      ansible.builtin.debug:
+        msg: "No ghost DHCP leases polluting DNS for {{ target_fqdn }} — nothing to delete."
+      when: ghost_ips | length == 0
+
+    - name: Delete each ghost lease
       ansible.builtin.include_tasks: tasks/delete-lease.yaml
-      loop: "{{ targets }}"
+      loop: "{{ ghost_ips }}"
       loop_control:
         loop_var: target_item
-        label: "{{ target_item.ip }}{% if target_item.hostname %}({{ target_item.hostname }}){% endif %}"
+        label: "{{ target_item }}"
+      when: ghost_ips | length > 0
 
-    - name: Flush local DNS cache again
+    - name: Apply DHCP changes on pfSense
+      ansible.builtin.uri:
+        url: "https://{{ pfsense_host }}/api/v2/services/dhcp_server/apply"
+        method: POST
+        headers:
+          x-api-key: "{{ pfsense_api_key }}"
+        validate_certs: false
+        status_code: [200, 202]
+      when: ghost_ips | length > 0
+
+    - name: Wait for DHCP/DNS to settle
+      ansible.builtin.pause:
+        seconds: 5
+      when: ghost_ips | length > 0
+
+    - name: Flush local DNS cache for the verification query
       ansible.builtin.command: resolvectl flush-caches
       changed_when: false
+
+    - name: Re-resolve hostname (fresh)
+      ansible.builtin.command: "getent hosts {{ target_fqdn }}"
+      changed_when: false
+      failed_when: false
+      register: dns_after
+
+    - name: Collect resolved IPs after cleanup
+      ansible.builtin.set_fact:
+        resolved_ips_after: "{{ dns_after.stdout_lines | default([]) | map('split') | map('first') | list }}"
+
+    - name: Verify ghosts are gone from DNS
+      ansible.builtin.assert:
+        that:
+          - (ghost_ips | intersect(resolved_ips_after)) | length == 0
+          - static_ip | default('') | length == 0 or static_ip in resolved_ips_after
+        fail_msg: "Ghost IPs still resolve for {{ target_fqdn }}: {{ ghost_ips | intersect(resolved_ips_after) }}"
+        success_msg: "DNS clean for {{ target_fqdn }} — ghost leases removed, remaining: {{ resolved_ips_after }}"
+      when: ghost_ips | length > 0
+
+    - name: Show final DNS state
+      ansible.builtin.debug:
+        msg:
+          - "resolved after: {{ resolved_ips_after }}"
