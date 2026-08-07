@@ -251,6 +251,12 @@ write_files:
 
         log "reboot $reboot_count/$MAX_REBOOTS"
         reboot
+        # `reboot` only signals systemd and returns immediately, so without an
+        # explicit exit the script falls through into validation / the
+        # readiness loop while a reboot is already pending — logging
+        # "validation attempt" after "rebooting before any validation" (seen
+        # on test01). Never proceed once a reboot has been issued.
+        exit 0
       }
 
       # --- main ---
