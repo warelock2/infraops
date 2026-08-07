@@ -1,74 +1,55 @@
 ---
-# Delete a single stale DHCP lease on pfSense.
-# Expects: target_item.ip, target_item.hostname (may be empty).
+# Delete a single ghost DHCP lease on pfSense (ISC backend).
+# Expects: target_item (the ghost IP address), pfsense_host, pfsense_api_key.
 # Called in a loop from manage-iac-dhcp.yaml with loop_var=target_item.
 #
-# Flow per IP:
-#   1. Resolve the hostname — if the offending IP no longer answers, the
-#      lease (and its DNS registration) is already gone, skip.
-#   2. Otherwise DELETE /api/v2/status/dhcp_server/leases with the IP in the
-#      body. The v2 plural-DELETE passes the request body as query params to
-#      delete_many(), which requires at least one query param and deletes
-#      every matching lease. The ISC backend stops dhcpd, rewrites the leases
-#      file and restarts — a brief DHCP blip, expected.
-#   3. Verify via the leases info module that the lease is really gone.
-
-- name: Flush local DNS cache before check
-  ansible.builtin.command: resolvectl flush-caches
-  changed_when: false
-  when: target_item.hostname | length > 0
-
-- name: Resolve hostname after flush
-  ansible.builtin.command: "getent hosts {{ target_item.hostname }}.{{ dns_domain }}"
-  changed_when: false
-  failed_when: false
-  register: dns_check
-  when: target_item.hostname | length > 0
-
-- name: Collect resolved IPs
-  ansible.builtin.set_fact:
-    resolved_ips: "{{ dns_check.stdout_lines | default([]) | map('split') | map('first') | list }}"
-  when: target_item.hostname | length > 0
-
-- name: Decide whether a delete is needed
-  ansible.builtin.set_fact:
-    lease_present: "{{ target_item.hostname | length == 0 or target_item.ip in resolved_ips }}"
-
-- name: Debug — record already cleared by flush
-  ansible.builtin.debug:
-    msg: "{{ target_item.ip }} no longer resolves for {{ target_item.hostname }}.{{ dns_domain }}, lease already gone"
-  when: target_item.hostname | length > 0 and not lease_present
-
-- name: Delete — remove DHCP lease via plural endpoint
+# NOTE: the pfSense REST API single-lease DELETE is broken on the ISC backend
+# (DHCPServerLease._delete() kills dhcpd, computes the cleaned leases file but
+# discards the result and never restarts dhcpd — a silent no-op). The working
+# path mirrors what pfSense's own delete_all() does: stop dhcpd, wait until it
+# is actually dead (so it cannot rewrite the file from memory), remove the
+# lease declaration block from dhcpd.leases, then let the caller POST the DHCP
+# apply endpoint to restart dhcpd. DNS verification happens back in the play.
+---
+- name: Stop dhcpd and wait until it is dead
   ansible.builtin.uri:
-    url: "https://{{ pfsense_host }}/api/v2/status/dhcp_server/leases"
-    method: DELETE
+    url: "https://{{ pfsense_host }}/api/v2/diagnostics/command_prompt"
+    method: POST
     headers:
       x-api-key: "{{ pfsense_api_key }}"
     body_format: json
     body:
-      ip: "{{ target_item.ip }}"
+      command: >-
+        killall dhcpd 2>/dev/null;
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+          pgrep -x dhcpd >/dev/null 2>&1 || break;
+          sleep 1;
+        done;
+        if pgrep -x dhcpd >/dev/null 2>&1; then echo STILL-RUNNING; else echo DEAD; fi
     validate_certs: false
-    status_code: [200, 202]
-  register: lease_delete
-  when: lease_present
+  register: lease_kill
 
-- name: Verify — list remaining DHCP leases
-  pfrest.pfsense.status_dhcp_server_leases_info:
-    api_host: "{{ pfsense_host }}"
-    api_key: "{{ pfsense_api_key }}"
-    api_protocol: https
-    validate_certs: false
-  register: leases_after
-  when: lease_present
-
-- name: Verify — lease is gone
-  ansible.builtin.assert:
-    that: target_item.ip not in (leases_after.data | map(attribute='ip') | list)
-    fail_msg: "Lease {{ target_item.ip }} still present after DELETE"
-  when: lease_present
-
-- name: Debug — display result
+- name: Debug — dhcpd stop result
   ansible.builtin.debug:
-    msg: "Deleted DHCP lease {{ target_item.ip }}{% if target_item.hostname %} ({{ target_item.hostname }}){% endif %}"
-  when: lease_present
+    msg: "dhcpd stop for {{ target_item }} -> {{ lease_kill.json.data.output }}"
+  failed_when: lease_kill.json.data.output != "DEAD"
+
+- name: Remove lease block from dhcpd.leases
+  ansible.builtin.uri:
+    url: "https://{{ pfsense_host }}/api/v2/diagnostics/command_prompt"
+    method: POST
+    headers:
+      x-api-key: "{{ pfsense_api_key }}"
+    body_format: json
+    body:
+      command: >-
+        sed -i '' '/^lease {{ target_item }} {$/,/^}$/d' /var/dhcpd/var/db/dhcpd.leases;
+        grep -c 'lease {{ target_item }} {' /var/dhcpd/var/db/dhcpd.leases;
+        echo DONE
+    validate_certs: false
+  register: lease_remove
+
+- name: Debug — lease removal result
+  ansible.builtin.debug:
+    msg: "lease {{ target_item }} removed -> {{ lease_remove.json.data.output }}"
+  failed_when: lease_remove.json.data.output.split('\n')[0] != "0"
