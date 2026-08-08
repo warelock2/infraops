@@ -6,7 +6,8 @@
 # and intended for pushing configuration to an EXISTING cluster. It skips the
 # NATS readiness handshake and the plan/apply loop entirely — it just:
 #   1. validates infrastructure.yaml, 2. generates the inventory from
-#   Terraform's ansible_inventory output, 3. runs the k8s-cluster playbook.
+#   conf/infrastructure.yaml (scripts/generate-inventory.py), 3. runs the
+#   k8s-cluster playbook.
 #
 # All steps run in the ci-base image (forgejo.afobl.com/warelock/ci-base),
 # which already bundles the toolchain: terraform (version pinned in
@@ -32,16 +33,10 @@ jobs:
             sh -c "check-jsonschema --schemafile conf/infrastructure.schema.yaml
             conf/infrastructure.yaml"
 
-      - name: Terraform Init and Generate Inventory
+      - name: Generate Ansible Inventory
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: >
-            sh -c "cd terraform &&
-            sh ../scripts/terraform-init-retry.sh init -reconfigure &&
-            terraform output -json ansible_inventory > ../ansible/inventory.json"
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          args: sh -c "python3 scripts/generate-inventory.py --output ansible/inventory.json"
 
       - name: Run K8s Cluster Playbook
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest

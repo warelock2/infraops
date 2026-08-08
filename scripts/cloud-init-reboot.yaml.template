@@ -4,7 +4,7 @@
 # cloud-init snippet injected into every new VM (vendor data).
 #
 # This is the SOURCE OF THE READINESS CONTRACT. When Terraform clones a VM
-# it attaches this snippet (filled in by ansible/create-proxmox-snippet.sh,
+# it attaches this snippet (filled in by scripts/update_vm_snippet.sh,
 # which substitutes __NATS_VM_PASSWORD__). What happens:
 #
 #   1. runcmd arms the reboot flag (/var/run/reboot-required), writes

@@ -54,9 +54,9 @@ Groups in Keycloak become the `groups` claim in the token, which K8s RBAC matche
 
 1. **Groups** → **Create group**
 2. Name the group, e.g.:
-   - `mushroom-admins` — full cluster-admin on the mushroom cluster
-   - `mushroom-viewers` — read-only access on mushroom
-   - `mushroom-developers` — namespace-scoped access on mushroom
+   - `cluster-a-admins` — full cluster-admin on the cluster-a cluster
+   - `cluster-a-viewers` — read-only access on cluster-a
+   - `cluster-a-developers` — namespace-scoped access on cluster-a
    - `cluster-b-admins` — full cluster-admin on cluster-b
 
 ### 3. Assign user to groups
@@ -66,8 +66,8 @@ Groups in Keycloak become the `groups` claim in the token, which K8s RBAC matche
 3. Select the group(s) → **Join**
 
 A user can be in multiple groups. For example:
-- `alice` → `mushroom-admins` + `cluster-b-admins` (admin on both clusters)
-- `bob` → `mushroom-viewers` + `cluster-b-admins` (view-only on mushroom, admin on cluster-b)
+- `alice` → `cluster-a-admins` + `cluster-b-admins` (admin on both clusters)
+- `bob` → `cluster-a-viewers` + `cluster-b-admins` (view-only on cluster-a, admin on cluster-b)
 - `carol` → `cluster-b-admins` (admin on cluster-b only)
 
 ### 4. Map groups to K8s RBAC (one-time per cluster)
@@ -77,11 +77,11 @@ Each K8s cluster needs `ClusterRoleBinding` resources that map Keycloak group na
 Apply these manifests using an existing admin kubeconfig (cert-based break-glass or existing OIDC admin):
 
 ```yaml
-# mushroom-admins → cluster-admin
+# cluster-a-admins → cluster-admin
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: mushroom-admins-cluster-admin
+  name: cluster-a-admins-cluster-admin
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -89,13 +89,13 @@ roleRef:
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
-    name: mushroom-admins
+    name: cluster-a-admins
 ---
-# mushroom-viewers → view-only
+# cluster-a-viewers → view-only
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: mushroom-viewers
+  name: cluster-a-viewers
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -103,14 +103,14 @@ roleRef:
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
-    name: mushroom-viewers
+    name: cluster-a-viewers
 ---
-# mushroom-developers → namespace-scoped (example: edit access to "dev" namespace)
+# cluster-a-developers → namespace-scoped (example: edit access to "dev" namespace)
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   namespace: dev
-  name: mushroom-developers-edit
+  name: cluster-a-developers-edit
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -118,7 +118,7 @@ roleRef:
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
-    name: mushroom-developers
+    name: cluster-a-developers
 ```
 
 **Important:** The `name` field in the `subjects` entry must match the **Keycloak group name exactly** (case-sensitive). This is the value that appears in the `groups` claim of the user's token.
@@ -128,7 +128,7 @@ subjects:
 Direct the user to:
 
 ```bash
-kubectl config use-context mushroom
+kubectl config use-context cluster-a
 kubectl get nodes
 ```
 
@@ -163,16 +163,16 @@ Each K8s cluster gets its own OIDC client in Keycloak and its own `--oidc-client
 
 ```
 Keycloak Realm: infraops
-├── Client: kubernetes-mushroom   (→ mushroom cluster, --oidc-client-id=kubernetes-mushroom)
+├── Client: kubernetes-cluster-a   (→ cluster-a cluster, --oidc-client-id=kubernetes-cluster-a)
 ├── Client: kubernetes-cluster-b  (→ cluster-b,  --oidc-client-id=kubernetes-cluster-b)
 │
-├── Group: mushroom-admins
-├── Group: mushroom-viewers
+├── Group: cluster-a-admins
+├── Group: cluster-a-viewers
 ├── Group: cluster-b-admins
 ├── Group: cluster-b-viewers
 │
-├── User: alice  → mushroom-admins, cluster-b-admins
-├── User: bob    → mushroom-viewers, cluster-b-admins
+├── User: alice  → cluster-a-admins, cluster-b-admins
+├── User: bob    → cluster-a-viewers, cluster-b-admins
 └── User: carol  → cluster-b-admins
 ```
 
@@ -186,7 +186,7 @@ Keycloak Realm: infraops
 ### Cross-cluster access
 
 A user in multiple groups gets tokens scoped to each cluster:
-- On `mushroom`: token's `aud` = `kubernetes-mushroom`, groups include whatever mushroom-relevant groups the user belongs to
+- On `cluster-a`: token's `aud` = `kubernetes-cluster-a`, groups include whatever cluster-a-relevant groups the user belongs to
 - On `cluster-b`: token's `aud` = `kubernetes-cluster-b`, groups include cluster-b-relevant groups
 
 The API server only validates against its own `--oidc-client-id`, so a token for one cluster cannot be reused against another.
