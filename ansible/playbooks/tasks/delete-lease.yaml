@@ -10,7 +10,6 @@
 # is actually dead (so it cannot rewrite the file from memory), remove the
 # lease declaration block from dhcpd.leases, then let the caller POST the DHCP
 # apply endpoint to restart dhcpd. DNS verification happens back in the play.
----
 - name: Stop dhcpd and wait until it is dead
   ansible.builtin.uri:
     url: "https://{{ pfsense_host }}/api/v2/diagnostics/command_prompt"
