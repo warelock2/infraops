@@ -47,14 +47,21 @@ echo "$ANSIBLE_SSH_PRIVATE_KEY" > /tmp/ansible_key
 chmod 600 /tmp/ansible_key
 mkdir -p ~/.kube
 
-echo "=== Fetching control-plane kubeconfig (if clusters exist) ==="
+echo "=== Fetching control-plane kubeconfig (if an existing cluster is already bootstrapped) ==="
 DNS_DOMAIN=$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml)
 if [ "$(yq '.clusters | length' conf/infrastructure.yaml)" -gt 0 ]; then
   CP01=$(yq -r '.clusters[0].name' conf/infrastructure.yaml)
-  ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -i /tmp/ansible_key ansible@k8s-${CP01}-control-01.${DNS_DOMAIN} \
-    sudo cat /etc/kubernetes/admin.conf > ~/.kube/config
-  chmod 600 ~/.kube/config
+  CP_FQDN=k8s-${CP01}-control-01.${DNS_DOMAIN}
+  if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 -i /tmp/ansible_key ansible@${CP_FQDN} \
+      'test -f /etc/kubernetes/admin.conf' 2>/dev/null; then
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 -i /tmp/ansible_key ansible@${CP_FQDN} \
+      sudo cat /etc/kubernetes/admin.conf > ~/.kube/config
+    chmod 600 ~/.kube/config
+  else
+    echo "WARNING: /etc/kubernetes/admin.conf absent on ${CP_FQDN} (fresh cluster not yet bootstrapped) - skipping kubeconfig fetch"
+  fi
 else
   echo "No clusters in infrastructure.yaml - skipping kubeconfig fetch"
 fi

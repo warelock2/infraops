@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stray `---` document separator in `tasks/delete-lease.yaml` (broke YAML parsing and DNS-driven ghost lease deletion)
 - enforce-iac `K8s Drain Removed Nodes` step skips when the cluster's control plane does not resolve (a brand-new/destroyed cluster has nothing to drain and no kubeconfig to fetch)
 - Readiness `hostinfo.txt` IP is now parsed from the static netplan cloud-init rendered from Terraform's `ip_config` instead of the VM's runtime `ip -4 addr show` — the VM's self-capture raced the netplan switch and could record the boot-window DHCP address, making helloworld reject the VM's correct static IP
+- `scripts/dns-lookup.sh` no longer falls back to an out-of-pool answer when the IaC pool is authoritative — a stale DHCP ghost (e.g. from a failed earlier run) could become a VM's static netplan IP, disagreeing with the in-pool DNS override. When the resolver yields no in-pool answer it now queries the pfSense host-override API directly (the source of truth `dns_alloc` writes), accepting the override IP only if it is in-pool
+- `scripts/configuration-management.sh` skips the control-plane kubeconfig fetch when `/etc/kubernetes/admin.conf` doesn't exist yet (fresh cluster not yet bootstrapped by the site playbook) instead of failing the whole config-management step
 
 ### Removed
 - `ansible/create-proxmox-snippet.sh` (superseded by `scripts/update_vm_snippet.sh`)
