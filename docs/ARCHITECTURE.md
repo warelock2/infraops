@@ -25,40 +25,46 @@ The InfraOps philosophy draws a bright line between infrastructure code (for Inf
 
 ```
 infraops/
-├── config/
+├── conf/
 │   ├── infrastructure.yaml          # Single source of truth (not in public git)
+│   ├── infrastructure_example.yaml  # Template for a fresh environment
 │   └── infrastructure.schema.yaml   # JSON Schema for validation
 ├── terraform/
 │   ├── main.tf                      # VM resources, DNS, providers
-│   ├── variables.tf                 # Input variables
+│   ├── variables.tf                 # Input variables (TF_VAR overrides)
 │   ├── outputs.tf                   # Ansible inventory output
+│   ├── templates/                   # Cloud-init meta-data template
 │   └── .terraform.lock.hcl          # Provider lock file
 ├── ansible/
 │   ├── ansible.cfg                  # Ansible configuration
 │   ├── group_vars/all/main.yml      # Platform variables
 │   ├── playbooks/
-│   │   ├── site.yaml                # Entry point (imports k8s-cluster.yaml)
-│   │   ├── k8s-cluster.yaml         # Full K8s bootstrap (581 lines)
+│   │   ├── site.yaml                # Entry point (imports common + k8s + final-act)
+│   │   ├── common.yaml              # Baseline: accounts + patching
+│   │   ├── k8s-cluster.yaml         # Full K8s bootstrap
+│   │   ├── final-act.yaml           # Post-patch reboot handling
 │   │   ├── k8s-drain-removed-nodes.yaml
 │   │   ├── manage-iac-dns.yaml      # DNS CRUD via pfSense API
-│   │   └── keycloak-setup.yaml      # Keycloak deployment
+│   │   ├── manage-iac-dhcp.yaml     # DHCP ghost-lease cleanup
+│   │   ├── keycloak-deploy.yaml     # Keycloak container deployment
+│   │   └── keycloak-setup.yaml      # Keycloak realm/clients bootstrap
 │   ├── roles/                       # Reusable Ansible roles
-│   └── templates/                   # Jinja2 templates (Keycloak docker-compose)
+│   └── templates/                   # Jinja2 templates (haproxy, keepalived, kubeadm)
 ├── scripts/
 │   ├── dns-lookup.sh                # DNS resolution helper
 │   ├── validate-infra.sh            # Schema validation
 │   ├── render-infra.py              # Draw.io diagram generation
 │   ├── generate-schema-docs.py      # Schema → SCHEMA_REFERENCE.md
 │   ├── k8s_import_context.sh        # Kubeconfig import one-liner
-│   └── build-ci-base.sh            # CI image builder
-├── snippets/
-│   └── cloud-init-reboot.yaml       # Proxmox cloud-init vendor data
+│   ├── restart-pfsense-dhcp.sh      # DHCP restart + ghost-lease DNS gate
+│   ├── terraform-apply-with-readiness.sh
+│   └── build-ci-base.sh             # CI image builder
 ├── docker/
 │   └── ci-base/Dockerfile           # CI base image (Alpine + Terraform + Ansible)
 ├── .forgejo/workflows/
-│   └── enforce-iac.yaml             # Main CI/CD pipeline
+│   ├── enforce-iac.yaml             # Main CI/CD pipeline
+│   └── deploy-k8s.yaml              # Manual k8s deployment
 ├── docs/                            # Documentation
-├── infrastructure_example.yaml      # Template for new deployments
 └── build-release.sh                 # Release management script
 ```
 
@@ -67,34 +73,24 @@ infraops/
 ```mermaid
 graph TD
     subgraph "Proxmox VE Host"
-        subgraph "Control Plane"
-            CP01["k8s-mushroom-control-01<br/>192.168.0.40"]
+        subgraph "Managed VMs"
+            TEST01["test01<br/>192.168.0.40"]
         end
-        subgraph "Workers"
-            W01["k8s-mushroom-worker-01<br/>192.168.0.41"]
-            W02["k8s-mushroom-worker-02<br/>192.168.0.42"]
-        end
-        subgraph "Services"
-            DOCKER["docker<br/>192.168.0.10"]
+        subgraph "Docker Host"
+            DOCKER["docker<br/>docker.localdomain"]
         end
     end
 
     FIREWALL["pfSense<br/>192.168.0.1<br/>DNS / DHCP / Gateway / VPN"]
-    VIP["k8s-mushroom-api.localdomain<br/>192.168.0.30"]
     VAULT["Vault<br/>vault.afobl.com"]
     MINIO["MinIO<br/>minio.afobl.com"]
     KEYCLOAK["Keycloak<br/>keycloak.afobl.com"]
 
-    FIREWALL -->|"DNS resolution"| CP01
-    FIREWALL -->|"DNS resolution"| W01
-    FIREWALL -->|"DNS resolution"| W02
+    FIREWALL -->|"DNS resolution"| TEST01
     FIREWALL -->|"DNS resolution"| DOCKER
-    VIP -->|"virtual IP"| CP01
-    VAULT -.->|"secrets"| CP01
-    VAULT -.->|"secrets"| W01
-    VAULT -.->|"secrets"| W02
-    MINIO -.->|"Terraform state"| CP01
-    KEYCLOAK -.->|"OIDC"| CP01
+    VAULT -.->|"secrets"| TEST01
+    MINIO -.->|"Terraform state"| TEST01
+    KEYCLOAK -.->|"OIDC"| TEST01
 ```
 
 ### IP Allocation
@@ -103,8 +99,8 @@ graph TD
 |-------|---------|
 | `192.168.0.1` | Gateway / pfSense (static, not in pool) |
 | `192.168.0.2` - `.9` | Static services (reserved) |
-| `192.168.0.10` - `.39` | Assigned services (docker, VIP, etc.) |
-| `192.168.0.40` - `.59` | IAC-managed VMs (20 IPs) |
+| `192.168.0.10` - `.39` | Assigned services (docker, etc.) |
+| `192.168.0.40` - `.49` | IAC-managed VMs (10 IPs) |
 | `192.168.0.100` - `.245` | DHCP pool |
 
 ## Data Flow
@@ -151,35 +147,27 @@ The `enforce-iac.yaml` workflow runs on push to `master` or manual dispatch:
 
 ```mermaid
 flowchart TD
-    START([Push to master]) --> VALIDATE["Validate Infrastructure YAML<br/>check-jsonschema"]
+    START([Push to master]) --> CHECKOUT["Checkout"]
+    CHECKOUT --> VALIDATE["Validate Infrastructure YAML<br/>check-jsonschema"]
     VALIDATE --> DIAGRAM["Generate Diagram<br/>render-infra.py"]
-    DIAGRAM --> TF_INIT["Terraform Init"]
+    DIAGRAM --> TF_INIT["Terraform Init<br/>(retry wrapper)"]
     TF_INIT --> TF_VALIDATE["Terraform Validate"]
-    TF_VALIDATE --> TF_PLAN["Terraform Plan"]
-    TF_PLAN --> CHECK{"Has clusters?"}
-
-    CHECK -->|Yes| DRAIN["K8s Drain Removed Nodes"]
-    CHECK -->|No| FIX_PERMS
-
+    TF_VALIDATE --> TF_PLAN["Terraform Plan<br/>(-detailed-exitcode)"]
+    TF_PLAN --> CHANGES["Check for Infrastructure Changes"]
+    CHANGES --> CLUSTERS["Check Clusters"]
+    CLUSTERS --> DRAIN["K8s Drain Removed Nodes"]
     DRAIN --> FIX_PERMS["Fix Terraform Dir Permissions"]
-    FIX_PERMS --> TF_APPLY["Terraform Apply<br/>-parallelism=1"]
-    TF_APPLY --> GEN_INV["K8s Generate Inventory"]
-    GEN_INV --> BOOTSTRAP["K8s Cluster Bootstrap<br/>ansible-playbook k8s-cluster.yaml"]
-    BOOTSTRAP --> DONE([Complete])
-
-    CHECK -->|No| FIX_PERMS
+    FIX_PERMS --> CONSUMER["Ensure Readiness Poller Consumer Exists"]
+    CONSUMER --> APPLY["Apply and Wait for Readiness<br/>NATS gate + failed-VM retries"]
+    APPLY --> DHCP["Restart pfSense DHCP<br/>auto-delete ghost leases"]
+    DHCP --> GEN_INV["Generate Ansible Inventory"]
+    GEN_INV --> CONFIG_MGMT["Configuration Management<br/>ansible-playbook site.yaml"]
+    CONFIG_MGMT --> DONE([Complete])
 ```
 
 ### Step Images
 
-| Step | Image | Why |
-|------|-------|-----|
-| Validate YAML | `python:3.12-alpine` | Lightweight, just needs `check-jsonschema` |
-| Generate Diagram | `python:3.12-alpine` | Needs `pyyaml` |
-| Terraform Init/Validate/Plan | `forgejo.afobl.com/warelock/ci-base:latest` | Terraform + Vault + MinIO client |
-| K8s Drain | `alpine/ansible:latest` | Ansible + kubectl |
-| Terraform Apply | `deltamir/terraform-ansible:1.15.0` | Terraform + Ansible for DNS provisioning |
-| K8s Bootstrap | `alpine/ansible:latest` | Ansible with all collections |
+Every step runs in the `forgejo.afobl.com/warelock/ci-base:latest` image (Terraform, Vault, NATS CLI, kubectl, yq, ansible-core + collections, provider mirror). Ansible only runs after the NATS readiness gate (`steps.apply-wait.outputs.ready == 'true'`) and a clean pfSense DHCP/DNS check, so it never touches a half-booted VM.
 
 ## Security Model
 

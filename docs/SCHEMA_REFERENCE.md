@@ -53,6 +53,7 @@ Default values applied to all clusters and VMs
 |---|---|---|---|---|
 | `defaults.cluster_type (1)` | string | `k8s` | `values: k8s, nomad, swarm, ecs` | Default cluster type for all clusters |
 | `defaults.service_type (1)` | string | `docker_compose` | `values: docker_compose, helm, systemd, nomad_job, ecs_service` | Default service deployment method |
+| `defaults.on_botched_vm_creation (1)` | string | `destroy` | `values: destroy, preserve` | How the orchestrator handles a VM whose creation went wrong: 'destroy' (default) tears it down and retries the apply; 'preserve' halts the production line and keeps the VM for forensics |
 | `defaults.service_host (1)` | string | — | `minLength: 1` | Default host for running services |
 | `defaults.gateway (1)` | string | — | `pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$` | Network gateway IP for static-configured VMs |
 | `defaults.vm (1)` | object | — | — | Default VM resource configuration for standalone hosts |

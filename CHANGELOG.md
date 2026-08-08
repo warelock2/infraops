@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-07
+
+### Added
+- **DHCP ghost-lease elimination** — a three-part fix for DNS pollution caused by short-lived leases VMs hold during their boot window:
+  - Guest side: `scripts/cloud-init-reboot.yaml.template` runcmd releases the VM's lease during the DHCP→static switch (`networkctl down eth0 && dhclient eth0 && dhclient -r eth0`, guarded by a marker file)
+  - Pipeline gate: `scripts/restart-pfsense-dhcp.sh` restarts pfSense DHCP via `/api/v2/services/dhcp_server/apply`, verifies every provisioned VM FQDN resolves only to in-pool IPs (192.168.0.40-.49), and **auto-deletes** any out-of-pool "ghost" lease that survived (stop dhcpd → sed `dhcpd.leases` → apply → re-verify)
+  - Manual fallback: `ansible/playbooks/manage-iac-dhcp.yaml` + `tasks/delete-lease.yaml` for DNS-driven ghost lease deletion
+- **NATS readiness handshake** — VM provisioning is now gated on a real readiness signal instead of sleep-based polling:
+  - `scripts/terraform-apply-with-readiness.sh`: derives the expected VM set from the Terraform plan (create/replace only), applies, and blocks until every expected VM signals; retries with failed-VM destruction
+  - `scripts/wait-for-readiness.sh`: consumes the `infraops.helloworld` stream; a declared VM failure (`.fail.<host>`) halts the wait for forensics
+  - `scripts/ensure-readiness-poller.sh`: creates/refreshes durable NATS consumers (`readiness-poller`, `failure-poller`) per run
+  - `scripts/destroy-failed-vms.sh`: tears down VMs that never signaled so the apply can retry
+  - Cloud-init `helloworld.sh`: validates hostname/IP/route/sshd/cloud-init, heals what it can, reboots up to `MAX_REBOOTS`, and only then publishes readiness; new `on_botched_vm_creation` (`destroy`/`preserve`) policy
+- **Orderly rolling k8s reboots** (`ansible/playbooks/tasks/final-act-reboot-node.yaml`): drain → reboot → rejoin wait → uncordon, one control node at a time for clusters with 3+ control planes
+- **Universal final-act playbook** (`ansible/playbooks/final-act.yaml`): post-patch reboot handling for every managed host + ntfy admin notification when a host needs manual attention
+- **Common baseline playbook** (`ansible/playbooks/common.yaml`): admin account + patching for all `configuration_management` hosts
+- **Standalone VM ID auto-allocation** (`scripts/standalone-vm-ids.py`): first-free ID from the pool via the Terraform external data source
+- **`scripts/terraform-init-retry.sh`**: retries flaky provider registry downloads with backoff
+- **`scripts/configuration-management.sh`**: config-management step moved to a script file (avoids quote-stripping of inline workflow args)
+- **Schema**: `on_botched_vm_creation` (`destroy`/`preserve`) added to `conf/infrastructure.schema.yaml`
+- **ci-base**: Dockerfile split into cached layers (base/pip/galaxy/binaries/provider mirror) for fast rebuilds; terraform provider mirror baked in for offline init
+- **Docs**: educational annotations across scripts, playbooks, tasks, templates, workflows, and the cloud-init readiness template; Architecture Highlights added to README
+
+### Changed
+- IaC DNS pool narrowed to `192.168.0.40-.49`
+- `scripts/dns-lookup.sh` now prefers IaC pool answers over any out-of-pool record
+- VMs cloned directly onto the RAIDZ datastore
+- kubeconfig for node draining fetched live from `control-01` instead of a stale secret
+- `ansible/requirements.txt` → `ansible/requirements.yaml` (galaxy collections)
+- deploy-k8s workflow now runs in the ci-base image instead of ad-hoc toolchain installs
+- Cloud-init snippet moved from `snippets/` to `scripts/`; `scripts/update_vm_snippet.sh` supersedes `ansible/create-proxmox-snippet.sh`
+- k8s node sizing reduced to 2GB RAM (defaults)
+- `scripts/vischema` renamed to `scripts/viinfra`
+
+### Fixed
+- Readiness wait now polls `cloud-init status` instead of the persisted boot-finished marker (which survives reboots and can pass mid-run)
+- helloworld exits after issuing a reboot and no longer auto-restarts in a loop
+- `StartLimit` keys moved from `[Service]` to `[Unit]`
+- `nats sub --timeout` now requires a duration suffix
+- Readiness extractor `jq` expression + apply flag position; `-parallelism=1` restored on apply
+- `--apiserver-bind-port 6444` passed to control-plane joins
+- Read-only Vault token can now read the ntfy channel secret
+- Durable `ens18` → `eth0` netplan fix; NIC naming standardized on `eth0`
+- Stray `---` document separator in `tasks/delete-lease.yaml` (broke YAML parsing and DNS-driven ghost lease deletion)
+
+### Removed
+- `ansible/create-proxmox-snippet.sh` (superseded by `scripts/update_vm_snippet.sh`)
+- `snippets/cloud-init-reboot.yaml.template` (moved to `scripts/`)
+- `ansible/requirements.txt` (replaced by `ansible/requirements.yaml`)
+- mushroom cluster from `conf/infrastructure.yaml` (testing churn; `clusters: []`)
+
+---
+
 ## [0.2.0] - 2025-08-02
 
 ### Added
