@@ -12,11 +12,12 @@
 # hosts without getent). Empty string if unresolvable.
 #
 # The IaC DNS pool (start/end) is the AUTHORITATIVE range for VM static
-# addresses. When supplied, any answer inside the pool wins over answers
-# outside it — so a DHCP lease registration or other foreign record can
-# never outrank the IaC host override, even if the resolver returns it
-# first. Falls back to the first answer if no pool is given or nothing
-# resolves inside it.
+# addresses. When supplied, ONLY an answer inside the pool is acceptable —
+# an out-of-pool record (a stale DHCP "ghost" or any foreign registration)
+# must NEVER become a VM's static IP. If the resolver yields no in-pool
+# answer, the script asks pfSense's host-override API directly (the source
+# of truth the IaC allocation writes to, immune to resolver caches and
+# DHCP-lease ghosts) and accepts the override's IP only if it is in-pool.
 #
 # Usage: dns-lookup.sh <hostname> [pool_start] [pool_end]
 # ===========================================================================
@@ -53,7 +54,41 @@ for candidate in $IP_LIST; do
     fi
 done
 
-# No pool match (or no pool given): use the first answer as a fallback.
-[ -z "$IP" ] && IP=$(echo "$IP_LIST" | head -1)
+# No pool given: fall back to the first resolver answer (historical behavior).
+if [ -z "$IP" ] && [ -z "$_start" ] && [ -z "$_end" ]; then
+    IP=$(echo "$IP_LIST" | head -1)
+fi
+
+# Authoritative fallback for the pool case: the resolver returned no in-pool
+# answer (stale resolver cache serving a ghost, or the override simply not yet
+# visible). The host-override record dns_alloc just created is the truth, so
+# read it straight from pfSense instead of trusting a foreign record.
+if [ -z "$IP" ] && [ -n "$_start" ] && [ -n "$_end" ]; then
+    SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+    INFRA="$SCRIPT_DIR/../conf/infrastructure.yaml"
+    if [ -f "$INFRA" ] \
+        && command -v yq >/dev/null 2>&1 \
+        && command -v vault >/dev/null 2>&1 \
+        && command -v curl >/dev/null 2>&1 \
+        && command -v jq >/dev/null 2>&1; then
+        export VAULT_ADDR="${VAULT_ADDR:-https://vault.afobl.com}"
+        export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-true}"
+        PFSENSE_HOST=$(yq -r '[.hosts[] | select(.services? != null) | select(.services[]? == "dns")][0].connection.host' "$INFRA" 2>/dev/null)
+        PFSENSE_API_KEY=$(vault kv get -format=json secret/infraops/pfsense 2>/dev/null | jq -r '.data.data.api_key')
+        if [ -n "$PFSENSE_HOST" ] && [ -n "$PFSENSE_API_KEY" ]; then
+            _name="${HOST%%.*}"
+            _domain="${HOST#*.}"
+            API_IP=$(curl -k -sS -H "x-api-key: $PFSENSE_API_KEY" \
+                "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_overrides" 2>/dev/null |
+                jq -r --arg h "$_name" --arg d "$_domain" '.data[] | select(.host == $h and .domain == $d) | .ip[0]' 2>/dev/null | head -1)
+            if [ -n "$API_IP" ]; then
+                _val=$(echo "$API_IP" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
+                if [ "$_val" -ge "$_start" ] && [ "$_val" -le "$_end" ] 2>/dev/null; then
+                    IP="$API_IP"
+                fi
+            fi
+        fi
+    fi
+fi
 
 printf '{"ip":"%s"}' "$IP"
