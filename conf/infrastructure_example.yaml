@@ -80,11 +80,11 @@ clusters:
     control_plane:
       nodes: 1
       vm_id_start: 9000
-      vm_id_end: 9099
+      vm_id_end: 9049
       vip: "10.0.0.100"
     workers:
       nodes: 2
-      vm_id_start: 9010
+      vm_id_start: 9050
       vm_id_end: 9099
 
 # ---------------------------------------------------------------------------
