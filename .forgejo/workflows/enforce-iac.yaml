@@ -134,12 +134,17 @@ jobs:
         with:
           args: >
             sh -c "
+            K8S_DOMAIN=\$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
+            CP01=\$(yq -r '.clusters[0].name' conf/infrastructure.yaml) &&
+            CP_FQDN=k8s-\${CP01}-control-01.\${K8S_DOMAIN} &&
+            if ! getent hosts \"\${CP_FQDN}\" >/dev/null 2>&1; then
+              echo \"\${CP_FQDN} does not resolve - no existing cluster to drain (new cluster); skipping\";
+              exit 0;
+            fi &&
             mkdir -p ~/.kube &&
             echo \"\$ANSIBLE_SSH_PRIVATE_KEY\" > /tmp/ansible_key &&
             chmod 600 /tmp/ansible_key &&
-            K8S_DOMAIN=\$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
-            CP01=\$(yq -r '.clusters[0].name' conf/infrastructure.yaml) &&
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /tmp/ansible_key ansible@k8s-\${CP01}-control-01.\${K8S_DOMAIN} 'sudo cat /etc/kubernetes/admin.conf' > ~/.kube/config &&
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /tmp/ansible_key ansible@\${CP_FQDN} 'sudo cat /etc/kubernetes/admin.conf' > ~/.kube/config &&
             chmod 600 ~/.kube/config &&
             ansible-playbook ansible/playbooks/k8s-drain-removed-nodes.yaml -i localhost,"
         env:
