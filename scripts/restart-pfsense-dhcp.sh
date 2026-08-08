@@ -1,6 +1,7 @@
 #!/bin/sh
 # ===========================================================================
-# Restart the pfSense DHCP service and verify DNS is clean afterwards.
+# Restart the pfSense DHCP service and verify DNS is clean afterwards,
+# auto-deleting any ghost DHCP leases that survived the restart.
 #
 # Why: a freshly cloned VM holds a short DHCP lease during its boot window
 # (before cloud-init applies the static netplan). The VM now releases that
@@ -15,8 +16,13 @@
 #   2. POST /api/v2/services/dhcp_server/apply — restarts dhcpd; dhcpleases
 #      regenerates Unbound from the (now lease-free) leases file.
 #   3. Verify every provisioned VM FQDN resolves to ONLY IPs inside the IaC
-#      pool (192.168.0.40-49). Any out-of-pool answer means a ghost survived
-#      the restart — fail the step so Ansible never runs against it.
+#      pool (192.168.0.40-49).
+#   4. If any out-of-pool ("ghost") answer survived the restart, DELETE each
+#      ghost lease from dhcpd.leases (stop dhcpd -> sed the lease block ->
+#      POST apply — the same sequence proven in
+#      ansible/playbooks/tasks/delete-lease.yaml) and re-verify. The step
+#      only fails if a ghost persists after deletion, so the pipeline
+#      self-heals transient DNS pollution instead of stopping the show.
 #
 # Usage:
 #   VAULT_TOKEN=... sh scripts/restart-pfsense-dhcp.sh
@@ -132,31 +138,101 @@ sys.exit(0 if start <= ip <= end else 1)
 PYEOF
 }
 
-GHOSTS=0
-for fqdn in $PROVISIONED_FQDNS; do
-  # Retry resolution so a just-restarted resolver doesn't trip a stale cache.
-  IP_LIST=""
-  for attempt in 1 2 3; do
-    IP_LIST=$(resolve_fqdn "$fqdn")
-    [ -n "$IP_LIST" ] && break
-    echo "  $fqdn not resolvable yet (attempt $attempt/3) — retrying"
-    sleep 3
-  done
-  [ -n "$IP_LIST" ] || { echo "ERROR: $fqdn does not resolve at all" >&2; GHOSTS=1; continue; }
+# command_prompt runs a command on pfSense via the diagnostics endpoint and
+# prints the API's text output. Mirrors delete-lease.yaml's API usage.
+command_prompt() {
+  curl -k -sS \
+    -X POST \
+    -H "x-api-key: $PFSENSE_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$(python3 -c 'import json, sys; print(json.dumps({"command": sys.argv[1]}))' "$1")" \
+    "https://$PFSENSE_HOST/api/v2/diagnostics/command_prompt" |
+    python3 -c 'import json, sys; print(json.load(sys.stdin).get("data", {}).get("output", ""))'
+}
 
-  for ip in $IP_LIST; do
-    if ip_in_pool "$ip"; then
-      echo "  OK: $fqdn -> $ip (in pool)"
-    else
-      echo "  GHOST: $fqdn -> $ip (outside pool)" >&2
-      GHOSTS=1
-    fi
-  done
-done
+# delete_ghost_lease removes one lease declaration from dhcpd.leases, using the
+# exact sequence from ansible/playbooks/tasks/delete-lease.yaml: stop dhcpd and
+# wait until it is truly dead (so it cannot rewrite the file from memory), then
+# sed the lease block out. The caller restarts dhcpd once after all deletions.
+delete_ghost_lease() {
+  target_item="$1"
+  echo "  Deleting ghost lease $target_item"
 
-if [ "$GHOSTS" -ne 0 ]; then
-  echo "FATAL: out-of-pool DNS answers survived the DHCP restart — refusing to proceed" >&2
-  exit 1
+  kill_out=$(command_prompt "killall dhcpd 2>/dev/null; for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -x dhcpd >/dev/null 2>&1 || break; sleep 1; done; if pgrep -x dhcpd >/dev/null 2>&1; then echo STILL-RUNNING; else echo DEAD; fi")
+  case "$kill_out" in
+    *DEAD*) ;;
+    *) echo "ERROR: dhcpd did not stop before deleting lease $target_item (output: $kill_out)" >&2; exit 1 ;;
+  esac
+
+  remove_out=$(command_prompt "sed -i '' '/^lease $target_item {\$/,/^}\$/d' /var/dhcpd/var/db/dhcpd.leases; grep -c 'lease $target_item {' /var/dhcpd/var/db/dhcpd.leases; echo DONE")
+  remaining=$(printf '%s\n' "$remove_out" | head -n1)
+  if [ "$remaining" != "0" ]; then
+    echo "ERROR: lease $target_item still present in dhcpd.leases (output: $remove_out)" >&2
+    exit 1
+  fi
+  echo "  Ghost lease $target_item removed from dhcpd.leases"
+}
+
+# verify_dns resolves every provisioned FQDN, prints OK/GHOST per answer, and
+# sets GHOST_IPS to the out-of-pool answers found (space separated). Returns
+# 0 when DNS is clean, 1 when at least one ghost survived.
+verify_dns() {
+  GHOST_IPS=""
+  GHOSTS=0
+  for fqdn in $PROVISIONED_FQDNS; do
+    # Retry resolution so a just-restarted resolver doesn't trip a stale cache.
+    IP_LIST=""
+    for attempt in 1 2 3; do
+      IP_LIST=$(resolve_fqdn "$fqdn")
+      [ -n "$IP_LIST" ] && break
+      echo "  $fqdn not resolvable yet (attempt $attempt/3) — retrying"
+      sleep 3
+    done
+    [ -n "$IP_LIST" ] || { echo "ERROR: $fqdn does not resolve at all" >&2; GHOSTS=1; continue; }
+
+    for ip in $IP_LIST; do
+      if ip_in_pool "$ip"; then
+        echo "  OK: $fqdn -> $ip (in pool)"
+      else
+        echo "  GHOST: $fqdn -> $ip (outside pool)" >&2
+        GHOST_IPS="$GHOST_IPS $ip"
+        GHOSTS=1
+      fi
+    done
+  done
+  [ "$GHOSTS" -eq 0 ]
+}
+
+if verify_dns; then
+  echo "=== DNS clean: every provisioned VM resolves only to pool IPs ==="
+  exit 0
 fi
 
-echo "=== DNS clean: every provisioned VM resolves only to pool IPs ==="
+echo "=== Auto-deleting ghost DHCP leases that survived the restart ==="
+for ghost_ip in $GHOST_IPS; do
+  delete_ghost_lease "$ghost_ip"
+done
+
+echo "=== Restarting pfSense DHCP service after lease deletion (apply) ==="
+HTTP_CODE=$(curl -k -sS -o /tmp/dhcp_apply.json -w '%{http_code}' \
+  -X POST \
+  -H "x-api-key: $PFSENSE_API_KEY" \
+  "https://$PFSENSE_HOST/api/v2/services/dhcp_server/apply")
+echo "apply HTTP $HTTP_CODE"
+[ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "202" ] || {
+  echo "ERROR: DHCP apply failed (HTTP $HTTP_CODE)" >&2
+  cat /tmp/dhcp_apply.json >&2 || true
+  exit 1
+}
+
+echo "=== Waiting for DHCP/DNS to settle ==="
+sleep 5
+
+echo "=== Re-verifying DNS after ghost lease deletion ==="
+if verify_dns; then
+  echo "=== DNS clean after deleting ghost lease(s): $GHOST_IPS ==="
+  exit 0
+fi
+
+echo "FATAL: out-of-pool DNS answers survived the DHCP restart AND ghost-lease deletion — refusing to proceed" >&2
+exit 1
