@@ -8,9 +8,11 @@
 # which substitutes __NATS_VM_PASSWORD__). What happens:
 #
 #   1. runcmd arms the reboot flag (/var/run/reboot-required), writes
-#      /etc/helloworld/hostinfo.txt (hostname/ip/vm_id from the system),
-#      releases the DHCP lease the boot window left behind (see below), then
-#      starts helloworld.service.
+#      /etc/helloworld/hostinfo.txt (hostname + vm_id from the system; the
+#      ip is parsed from the static netplan cloud-init rendered from
+#      Terraform's ip_config — the IaC-injected expected IP, never the VM's
+#      runtime view), releases the DHCP lease the boot window left behind
+#      (see below), then starts helloworld.service.
 #   2. helloworld.sh waits for cloud-init; if the reboot flag is present it
 #      reboots first (a clean reboot re-registers DHCP/DNS and re-runs
 #      cloud-init). Otherwise it validates hostname/IP/route/sshd/NATS
@@ -351,7 +353,11 @@ runcmd:
   - touch /var/run/reboot-required
   - >
     AUTH_HOSTNAME=$(hostname) &&
-    AUTH_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '127.0.0.1' | head -1) &&
+    AUTH_IP=$(grep -oP '(?<=")\d+(\.\d+){3}(?=/\d+")' /etc/netplan/50-cloud-init.yaml | head -1 || true) &&
+    if [ -z "$AUTH_IP" ]; then
+      echo "ERROR: no static address in /etc/netplan/50-cloud-init.yaml - cannot verify IaC-injected IP" >&2;
+      exit 1;
+    fi &&
     AUTH_VMID=$(cat /sys/class/dmi/id/product_serial) &&
     printf "hostname: %s\nip: %s\nvm_id: %s\n" "$AUTH_HOSTNAME" "$AUTH_IP" "$AUTH_VMID" > /etc/helloworld/hostinfo.txt
   # Release the boot-window DHCP lease (see header comment). No `networkctl up`
