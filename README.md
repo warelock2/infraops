@@ -45,6 +45,16 @@ curl -sfL https://YOUR_FORGEJO_URL/warelock/infraops/raw/branch/master/scripts/i
 
 Requirements: `vault` (with token), `jq`, `nats`. See [docs/NATS.md](docs/NATS.md) for full setup, rotation, and troubleshooting.
 
+### Configure kubectl with OIDC (Keycloak)
+
+For SSO access to a cluster instead of admin certs, run the Keycloak client setup (installs `kubelogin` if missing and wires the OIDC device-flow exec plugin into your kubeconfig):
+
+```bash
+./scripts/k8s-oidc-client-setup.sh --cluster=mushroom
+```
+
+Requires a Keycloak account in the `infraops` realm with membership in the cluster's `<cluster>-admins` or `<cluster>-viewers` group. Full workflow — user onboarding, first login, revoking access — is in [docs/k8s-keycloak-user-management-guide.md](docs/k8s-keycloak-user-management-guide.md).
+
 ### Deploy a Cluster
 
 Trigger the `enforce-iac` workflow via Forgejo or:
