@@ -23,7 +23,7 @@ GOLDENIMG_FILE="ubuntu-26.04-server-goldenimg-amd64.img"
 FORGEJO_RAW_URL="https://forgejo.afobl.com/warelock/infraops/raw/branch/master/conf/infrastructure.yaml"
 
 # --- Fetch nats CLI version from infrastructure.yaml ---
-NATS_CLI_VERSION=$(curl -sf "$FORGEJO_RAW_URL" | yq -p yaml '.platform.nats.cli_version' -)
+NATS_CLI_VERSION=$(curl -sf "$FORGEJO_RAW_URL" | yq -p yaml '.tools.nats_cli' -)
 if [ -z "$NATS_CLI_VERSION" ]; then
   echo "ERROR: Could not fetch nats CLI version from infrastructure.yaml" >&2
   exit 1

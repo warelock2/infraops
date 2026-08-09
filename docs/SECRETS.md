@@ -70,7 +70,7 @@ External services live outside this repo (no IaC); recorded here for reproducibi
 | pfSense | CE 2.8.1 | Requires REST API v2; pfrest.pfsense 0.0.13 |
 | Forgejo | 8.0.3 | Server on `docker.localdomain:3000` |
 | Vault | 1.19.4 | CLI `vault --version` may lag the server |
-| NATS server | 2.14.3 | NATS CLI pinned in SSOT as `platform.nats.cli_version` |
+| NATS server | 2.14.3 | NATS CLI pinned in SSOT as `tools.nats_cli` |
 | MinIO | RELEASE.2025-09-07T16-13-09Z | S3 backend `minio.afobl.com:9000` |
 
 ## Known Deprecations & Flags

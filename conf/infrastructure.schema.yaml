@@ -27,12 +27,72 @@ type: object
 additionalProperties: false
 required:
   - name
+  - tools
 
 properties:
   name:
     type: string
     minLength: 1
     description: Infrastructure name
+
+  tools:
+    type: object
+    description: Every tool version pinned for reproducible builds, grouped in one place
+    additionalProperties: false
+    properties:
+      kubernetes:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: Kubernetes cluster version to install (kubeadm + kubelet + kube-apiserver)
+      kubectl:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: kubectl CLI version baked into the CI image
+      calico:
+        type: string
+        pattern: "^(latest|v[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: Calico CNI plugin version
+      terraform:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: Terraform CLI version baked into the CI image
+      vault_cli:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: Vault CLI version baked into the CI image
+      nats_cli:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: NATS CLI version installed in the golden template and CI image
+      ansible_core:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: ansible-core version installed in the CI image
+      ansible_collections:
+        type: object
+        description: Ansible collection versions (key = collection name, value = version)
+        additionalProperties:
+          type: string
+      alpine:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: Alpine base image version for the CI image
+      hvac:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: hvac (HashiCorp Vault python client) version
+      pfsense_vshell:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: pfsense-vshell python library version
+      check_jsonschema:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: check-jsonschema CLI version
+      yq:
+        type: string
+        pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+        description: yq (mikefarah) YAML processor version
 
   platform:
     type: object
@@ -78,92 +138,14 @@ properties:
         description: Kubernetes cluster defaults
         additionalProperties: false
         properties:
-          version:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: Kubernetes version to install
           pod_network_cidr:
             type: string
             pattern: "^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$"
             description: CIDR range for pod networking
-          calico_version:
-            type: string
-            pattern: "^(latest|v[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: Calico CNI plugin version
-          kubectl_version:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: kubectl CLI version baked into the CI image
           oidc_issuer_url:
             type: string
             format: uri
             description: OIDC issuer URL for cluster authentication
-      terraform:
-        type: object
-        description: Terraform version configuration
-        additionalProperties: false
-        properties:
-          version:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: Terraform version constraint
-      nats:
-        type: object
-        description: NATS CLI configuration
-        additionalProperties: false
-        properties:
-          cli_version:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: NATS CLI version to install in golden template and CI image
-      vault:
-        type: object
-        description: Vault CLI configuration
-        additionalProperties: false
-        properties:
-          cli_version:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: Vault CLI version baked into the CI image
-      ansible:
-        type: object
-        description: Ansible core and collection versions baked into the CI image
-        additionalProperties: false
-        properties:
-          core_version:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: ansible-core version installed in the CI image
-          collections:
-            type: object
-            description: Ansible collection versions (key = collection name, value = version)
-            additionalProperties:
-              type: string
-      ci_base:
-        type: object
-        description: Remaining CI image build pins (base image + python tooling)
-        additionalProperties: false
-        properties:
-          alpine:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: Alpine base image version for the CI image
-          hvac:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: hvac (HashiCorp Vault python client) version
-          pfsense_vshell:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: pfsense-vshell python library version
-          check_jsonschema:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: check-jsonschema CLI version
-          yq:
-            type: string
-            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
-            description: yq (mikefarah) YAML processor version
       proxmox:
         type: object
         description: Proxmox VE host configuration
