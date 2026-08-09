@@ -118,7 +118,7 @@
 
     - name: Set vault URL
       ansible.builtin.set_fact:
-        vault_url: "https://{{ docker_host.connection.host }}:{{ vault_port }}"
+        vault_url: "https://{{ docker_host.connection.host | default(docker_host.name ~ '.' ~ (infra.platform.proxmox.dns_domain | default('localdomain'))) }}:{{ vault_port }}"
 
     - name: Get pfSense API key from Vault
       community.hashi_vault.vault_kv2_get:

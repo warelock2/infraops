@@ -120,7 +120,7 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
         name = host["name"]
         connection = host.get("connection", {})
         host_vars = {
-            "ansible_host": connection.get("host", name),
+            "ansible_host": connection.get("host") or f"{name}.{dns_domain}",
             "ansible_user": connection.get("user", "ansible"),
             "post_patch_reboot": host.get("post_patch_reboot", True),
         }

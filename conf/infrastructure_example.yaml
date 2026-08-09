@@ -11,6 +11,31 @@
 name: my-infrastructure
 
 # ---------------------------------------------------------------------------
+# tools — every tool version pinned for reproducible builds, grouped in one
+# place. The real file pins exact versions (see conf/infrastructure.yaml);
+# the schema validates version patterns and the "latest" keyword.
+# ---------------------------------------------------------------------------
+tools:
+  kubernetes: "1.33.0"
+  kubectl: "1.33.0"
+  calico: "v3.29.2"
+  terraform: "1.7.5"
+  vault_cli: "1.17.3"
+  nats_cli: "0.4.0"
+  ansible_core: "2.21.2"
+  ansible_collections:
+    community_general: "13.2.0"
+    community_hashi_vault: "7.1.0"
+    ansible_posix: "2.2.2"
+    kubernetes_core: "6.5.0"
+    pfrest_pfsense: "0.0.13"
+  alpine: "3.24.1"
+  hvac: "2.4.0"
+  pfsense_vshell: "2.2.4"
+  check_jsonschema: "0.37.4"
+  yq: "4.53.3"
+
+# ---------------------------------------------------------------------------
 # platform — repo-wide defaults: admin user/group, OIDC provider, version
 # pins, and the Proxmox node VMs are cloned from.
 # ---------------------------------------------------------------------------
@@ -24,12 +49,8 @@ platform:
     admin_user: admin
     container_image: "forgejo.afobl.com/warelock/keycloak:latest"
   kubernetes:
-    version: "1.33.0"
     pod_network_cidr: "10.244.0.0/16"
-    calico_version: "v3.29.2"
     oidc_issuer_url: "https://keycloak.example.com:8443/realms/myproject"
-  terraform:
-    version: "1.7.5"
   proxmox:
     node: myproxmox
     template_id: 8000
@@ -98,7 +119,6 @@ hosts:
     enforcement:
       - configuration_management
     connection:
-      host: docker.example.com
       user: ansible
 
   - name: testvm
@@ -106,7 +126,6 @@ hosts:
       - infrastructure_provisioning
       - configuration_management
     connection:
-      host: testvm.example.com
       user: ansible
 
   - name: firewall

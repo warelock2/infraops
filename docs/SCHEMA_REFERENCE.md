@@ -160,7 +160,8 @@ Type: `array`
 | `hosts[].vm.disk_gb (3)` | integer | — | `min: 1` | Disk size (GB) override |
 | `hosts[].vm.datastore (3)` | string | — | — | Datastore override |
 | `hosts[].connection (2)` | object | — | — | SSH connection details |
-| `hosts[].connection.host (3)` | string | — | `minLength: 1` | SSH connection hostname or IP |
+| `hosts[].connection.host (3)` | string | — | `minLength: 1` | SSH connection hostname or IP override. Defaults to <name>.<dns_domain> (e.g. host "docker" with dns_domain "localdomain" reaches docker.localdomain). Only set this to override the derived FQDN (e.g. an IP address).
+ |
 | `hosts[].connection.user (3)` | string | — | `minLength: 1` | SSH connection username |
 
 ## Services
