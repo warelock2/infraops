@@ -116,7 +116,7 @@ Type: `array`
 | `clusters[].plane_defaults.workers.cores (4)` | integer | — | `min: 1` | Worker CPU override |
 | `clusters[].plane_defaults.workers.disk_gb (4)` | integer | — | `min: 1` | Worker disk override |
 | `clusters[].control_plane (2)` | object | — | — | Control plane node configuration |
-| `clusters[].control_plane.nodes (3)` | integer | — | `min: 1` | Number of control plane nodes (1, 3, or 5) |
+| `clusters[].control_plane.nodes (3)` | integer | — | `min: 1; not multiple of: 2` | Number of control plane nodes (must be odd — e.g. 1, 3, or 5 — for quorum voting) |
 | `clusters[].control_plane.vip (3)` | string | — | `pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$` | Virtual IP for k8s API endpoint (keepalived) |
 | `clusters[].control_plane.vm_id_start (3)` | integer | — | `min: 100` | Start of VM ID range for control plane |
 | `clusters[].control_plane.vm_id_end (3)` | integer | — | `min: 100` | End of VM ID range for control plane |
