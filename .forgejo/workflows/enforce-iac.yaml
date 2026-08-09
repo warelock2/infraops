@@ -237,3 +237,22 @@ jobs:
           ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
           ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+
+      # ---------------------------------------------------------------------
+      # Clear the "iac" tag set by Terraform at VM creation, ONLY on the VMs
+      # this run created/replaced (steps.apply-wait.outputs.created_vms).
+      # This is deliberately the LAST step: fail-fast means it only runs when
+      # the whole run (apply + readiness + config management) succeeded, so a
+      # failed run leaves the tag in place and the affected VMs stay visible
+      # in the Proxmox UI. Any future post-Ansible tools go before this step.
+      # ---------------------------------------------------------------------
+      - name: Clear IaC Tags
+        if: github.ref == 'refs/heads/master' && steps.apply-wait.outputs.ready == 'true' && steps.changes.outputs.changed == 'true'
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
+        with:
+          args: sh scripts/clear-iac-tags.sh
+        env:
+          CREATED_VMS: ${{ steps.apply-wait.outputs.created_vms }}
+          VAULT_ADDR: https://vault.afobl.com
+          VAULT_SKIP_VERIFY: "true"
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
