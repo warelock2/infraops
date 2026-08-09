@@ -29,6 +29,7 @@ def collect_properties(schema_node, path_prefix=""):
                 "maximum": node.get("maximum"),
                 "minLength": node.get("minLength"),
                 "format": node.get("format"),
+                "not": node.get("not"),
             })
             if node.get("type") == "object":
                 if "properties" in node:
@@ -95,6 +96,15 @@ def format_constraints(prop):
         parts.append(f"minLength: {prop['minLength']}")
     if prop.get("format"):
         parts.append(f"format: {prop['format']}")
+    not_constraint = prop.get("not")
+    if isinstance(not_constraint, dict):
+        if "multipleOf" in not_constraint:
+            parts.append(f"not multiple of: {not_constraint['multipleOf']}")
+        elif "enum" in not_constraint:
+            vals = ", ".join(str(v) for v in not_constraint["enum"])
+            parts.append(f"not one of: {vals}")
+        elif "pattern" in not_constraint:
+            parts.append(f"not matching: {not_constraint['pattern']}")
 
     return "; ".join(parts) if parts else None
 

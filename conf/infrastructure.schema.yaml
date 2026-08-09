@@ -391,7 +391,9 @@ properties:
             nodes:
               type: integer
               minimum: 1
-              description: Number of control plane nodes (1, 3, or 5)
+              not:
+                multipleOf: 2
+              description: Number of control plane nodes (must be odd — e.g. 1, 3, or 5 — for quorum voting)
             vip:
               type: string
               pattern: "^([0-9]{1,3}\\.){3}[0-9]{1,3}$"
