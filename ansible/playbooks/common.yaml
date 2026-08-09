@@ -51,12 +51,20 @@
         owner: "{{ infra_admin_user }}"
         group: "{{ infra_admin_group }}"
 
-    - name: Add SSH public key
+    - name: Add CI-injected SSH public key
       ansible.posix.authorized_key:
         user: "{{ infra_admin_user }}"
         state: present
         key: "{{ lookup('file', infra_ssh_key_file) }}"
         exclusive: no
+
+    - name: Add repo-tracked admin SSH public keys
+      ansible.posix.authorized_key:
+        user: "{{ infra_admin_user }}"
+        state: present
+        key: "{{ lookup('file', item) }}"
+        exclusive: no
+      loop: "{{ query('fileglob', playbook_dir + '/../files/warelock-*.pub') }}"
 
     - name: "Ensure {{ infra_admin_user }} can sudo without password"
       ansible.builtin.lineinfile:
