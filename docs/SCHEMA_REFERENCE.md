@@ -29,14 +29,26 @@ Platform-specific configuration
 | `platform.keycloak.admin_user (2)` | string | `admin` | — | Keycloak administrator username |
 | `platform.keycloak.container_image (2)` | string | — | `minLength: 1` | Keycloak container image reference |
 | `platform.kubernetes (1)` | object | — | — | Kubernetes cluster defaults |
-| `platform.kubernetes.version (2)` | string | — | `pattern: ^[0-9]+\.[0-9]+\.[0-9]+$` | Kubernetes version to install |
+| `platform.kubernetes.version (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | Kubernetes version to install |
 | `platform.kubernetes.pod_network_cidr (2)` | string | — | `pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$` | CIDR range for pod networking |
-| `platform.kubernetes.calico_version (2)` | string | — | `pattern: ^v[0-9]+\.[0-9]+\.[0-9]+$` | Calico CNI plugin version |
+| `platform.kubernetes.calico_version (2)` | string | — | `pattern: ^(latest|v[0-9]+\.[0-9]+\.[0-9]+)$` | Calico CNI plugin version |
+| `platform.kubernetes.kubectl_version (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | kubectl CLI version baked into the CI image |
 | `platform.kubernetes.oidc_issuer_url (2)` | string | — | `format: uri` | OIDC issuer URL for cluster authentication |
 | `platform.terraform (1)` | object | — | — | Terraform version configuration |
-| `platform.terraform.version (2)` | string | — | `pattern: ^[0-9]+\.[0-9]+\.[0-9]+$` | Terraform version constraint |
+| `platform.terraform.version (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | Terraform version constraint |
 | `platform.nats (1)` | object | — | — | NATS CLI configuration |
-| `platform.nats.cli_version (2)` | string | — | `pattern: ^[0-9]+\.[0-9]+\.[0-9]+$` | NATS CLI version to install in golden template and CI image |
+| `platform.nats.cli_version (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | NATS CLI version to install in golden template and CI image |
+| `platform.vault (1)` | object | — | — | Vault CLI configuration |
+| `platform.vault.cli_version (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | Vault CLI version baked into the CI image |
+| `platform.ansible (1)` | object | — | — | Ansible core and collection versions baked into the CI image |
+| `platform.ansible.core_version (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | ansible-core version installed in the CI image |
+| `platform.ansible.collections (2)` | object | — | — | Ansible collection versions (key = collection name, value = version) |
+| `platform.ci_base (1)` | object | — | — | Remaining CI image build pins (base image + python tooling) |
+| `platform.ci_base.alpine (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | Alpine base image version for the CI image |
+| `platform.ci_base.hvac (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | hvac (HashiCorp Vault python client) version |
+| `platform.ci_base.pfsense_vshell (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | pfsense-vshell python library version |
+| `platform.ci_base.check_jsonschema (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | check-jsonschema CLI version |
+| `platform.ci_base.yq (2)` | string | — | `pattern: ^(latest|[0-9]+\.[0-9]+\.[0-9]+)$` | yq (mikefarah) YAML processor version |
 | `platform.proxmox (1)` | object | — | — | Proxmox VE host configuration |
 | `platform.proxmox.node (2)` | string | — | `minLength: 1` | Proxmox node name for VM placement |
 | `platform.proxmox.template_id (2)` | integer | — | `min: 100` | Proxmox template VM ID to clone from |

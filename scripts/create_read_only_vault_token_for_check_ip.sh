@@ -5,8 +5,15 @@
 # Principle of least privilege: instead of a broad root/token, this writes a
 # narrow policy that only allows READING the pfSense/proxmox/nats/ntfy paths
 # under secret/infraops/* (enough to check whether an IP is already allocated,
-# and for CI to read the ntfy channel) and mints a reusable, non-expiring
-# token bound to that policy.
+# and for CI to read the ntfy channel) and mints a reusable token bound to that
+# policy.
+#
+# PREREQUISITE: run the following once so this token is truly non-expiring
+# (a plain -period=0 token is NOT non-expiring — it just inherits the ~32-day
+# server default TTL):
+#   vault auth tune -default-lease-ttl=0 -max-lease-ttl=0 token/
+# With that in place, -ttl=0 means "no expiration". A leaked non-expiring token
+# is worse than a TTL'd one, so keep it in Vault/Forgejo secrets, never on disk.
 #
 # The emitted token goes to stdout — capture it, don't log it.
 # ===========================================================================
@@ -47,9 +54,10 @@ EOF
 
 echo "Policy '$POLICY_NAME' written."
 
-# 2. Create a reusable token (no expiry)
+# 2. Create a reusable token (non-expiring: relies on the token auth method
+#    being tuned to -max-lease-ttl=0, see the header).
 vault token create \
   -policy="$POLICY_NAME" \
   -display-name="$DISPLAY_NAME" \
-  -period=0 \
+  -ttl=0 \
   -format=json | jq -r '.auth.client_token'

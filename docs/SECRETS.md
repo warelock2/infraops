@@ -1,6 +1,6 @@
 # SECRETS
 
-Audit of all secrets used by infraops. Last updated: 2026-08-07.
+Audit of all secrets used by infraops. Last updated: 2026-08-08.
 
 ## Forgejo Secrets
 
@@ -57,7 +57,25 @@ Audit of all secrets used by infraops. Last updated: 2026-08-07.
 - **Tokens**: Two tokens, both created manually. Never write tokens to disk.
   - **Read-only** (`infraops-check-ip-availability` policy): reads `secret/infraops/pfsense`, `secret/infraops/proxmox`, `secret/infraops/nats`, and `secret/infraops/ntfy`. Passed as `VAULT_TOKEN` env var. Forgejo secret: `VAULT_RO_TOKEN`.
   - **Read-write** (`infraops-rw` policy): full CRUD on `secret/infraops/*`. Local use only. Not a Forgejo secret.
+- **Non-expiring tokens**: The token auth method is tuned with `vault auth tune -default-lease-ttl=0 -max-lease-ttl=0 token/`, and tokens are created with `-ttl=0` (see `scripts/create_*_vault_token_for_*.sh`). A plain `-period=0` token is NOT non-expiring — it inherits the ~32-day server default TTL. A leaked non-expiring token never expires on its own, so keep these in Vault/pass/Forgejo secrets, never on disk.
 - **Unsealed manually** — no auto-unseal configured.
+
+## External Platform Versions
+
+External services live outside this repo (no IaC); recorded here for reproducibility and pinned in `conf/infrastructure.yaml` where the build consumes them.
+
+| Service | Version | Notes |
+|---|---|---|
+| Proxmox VE | 9.2.10 | bpg/proxmox 0.111.1 verified compatible |
+| pfSense | CE 2.8.1 | Requires REST API v2; pfrest.pfsense 0.0.13 |
+| Forgejo | 8.0.3 | Server on `docker.localdomain:3000` |
+| Vault | 1.19.4 | CLI `vault --version` may lag the server |
+| NATS server | 2.14.3 | NATS CLI pinned in SSOT as `platform.nats.cli_version` |
+| MinIO | RELEASE.2025-09-07T16-13-09Z | S3 backend `minio.afobl.com:9000` |
+
+## Known Deprecations & Flags
+
+- **`apt_repository` (ansible.builtin)**: emits a deprecation warning under ansible-core 2.21 (its use is deprecated upstream). Tracked; pinned ansible-core 2.21.2 keeps builds reproducible, so the warning is accepted for now.
 
 ## Lifecycle
 

@@ -80,7 +80,7 @@ properties:
         properties:
           version:
             type: string
-            pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
             description: Kubernetes version to install
           pod_network_cidr:
             type: string
@@ -88,8 +88,12 @@ properties:
             description: CIDR range for pod networking
           calico_version:
             type: string
-            pattern: "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+            pattern: "^(latest|v[0-9]+\\.[0-9]+\\.[0-9]+)$"
             description: Calico CNI plugin version
+          kubectl_version:
+            type: string
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+            description: kubectl CLI version baked into the CI image
           oidc_issuer_url:
             type: string
             format: uri
@@ -101,7 +105,7 @@ properties:
         properties:
           version:
             type: string
-            pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
             description: Terraform version constraint
       nats:
         type: object
@@ -110,8 +114,56 @@ properties:
         properties:
           cli_version:
             type: string
-            pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
             description: NATS CLI version to install in golden template and CI image
+      vault:
+        type: object
+        description: Vault CLI configuration
+        additionalProperties: false
+        properties:
+          cli_version:
+            type: string
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+            description: Vault CLI version baked into the CI image
+      ansible:
+        type: object
+        description: Ansible core and collection versions baked into the CI image
+        additionalProperties: false
+        properties:
+          core_version:
+            type: string
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+            description: ansible-core version installed in the CI image
+          collections:
+            type: object
+            description: Ansible collection versions (key = collection name, value = version)
+            additionalProperties:
+              type: string
+      ci_base:
+        type: object
+        description: Remaining CI image build pins (base image + python tooling)
+        additionalProperties: false
+        properties:
+          alpine:
+            type: string
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+            description: Alpine base image version for the CI image
+          hvac:
+            type: string
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+            description: hvac (HashiCorp Vault python client) version
+          pfsense_vshell:
+            type: string
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+            description: pfsense-vshell python library version
+          check_jsonschema:
+            type: string
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+            description: check-jsonschema CLI version
+          yq:
+            type: string
+            pattern: "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$"
+            description: yq (mikefarah) YAML processor version
       proxmox:
         type: object
         description: Proxmox VE host configuration
