@@ -556,13 +556,16 @@ properties:
           description: SSH connection details
           additionalProperties: false
           required:
-            - host
             - user
           properties:
             host:
               type: string
               minLength: 1
-              description: SSH connection hostname or IP
+              description: >
+                SSH connection hostname or IP override. Defaults to
+                <name>.<dns_domain> (e.g. host "docker" with dns_domain
+                "localdomain" reaches docker.localdomain). Only set this to
+                override the derived FQDN (e.g. an IP address).
             user:
               type: string
               minLength: 1

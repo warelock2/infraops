@@ -22,11 +22,13 @@ output "ansible_inventory" {
               ansible_host = "${name}.${local.dns_domain}"
             }
           },
-          # Standalone hosts: connection info comes straight from the YAML.
+          # Standalone hosts: connection info comes from the YAML, but the
+          # FQDN is derived as <name>.<dns_domain> unless connection.host is
+          # an explicit override (e.g. an IP for the firewall).
           { for name, h in local.standalone_hosts :
             name => {
-              ansible_host = h.connection.host
-              ansible_user = h.connection.user
+              ansible_host = try(coalesce(h.connection.host, "${name}.${local.dns_domain}"), "${name}.${local.dns_domain}")
+              ansible_user = try(h.connection.user, "ansible")
             }
           }
         )
