@@ -46,6 +46,9 @@ id_rsa*
 .terraform.lock.hcl
 !terraform/.terraform.lock.hcl
 
+# Ansible (generated)
+ansible/inventory.json
+
 setpw.sh
 certs/
 session.json

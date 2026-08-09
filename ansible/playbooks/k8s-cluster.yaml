@@ -155,13 +155,6 @@
         mode: "0755"
       when: inventory_hostname in groups['k8s_control']
 
-    - name: Copy OIDC CA certificate
-      ansible.builtin.copy:
-        src: ../files/oidc-ca.pem
-        dest: /etc/kubernetes/pki/oidc-ca.pem
-        mode: "0644"
-      when: inventory_hostname in groups['k8s_control']
-
 # ---------------------------------------------------------------------------
 # Play 2 — High-availability API endpoint.
 #
