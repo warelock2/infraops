@@ -35,8 +35,9 @@ cd "$(dirname "$0")/.."
 GIT_DESCRIBE=$(git describe --tags --always)
 GIT_SHA=$(git rev-parse --short HEAD)
 
-# Fetch the SSOT once and source every binary version from it, so a controlled
-# version upgrade is a single edit in conf/infrastructure.yaml.
+# Fetch the SSOT from the repo (no checkout needed on the host) and source
+# every binary version from it, so a controlled version upgrade is a single
+# edit in conf/infrastructure.yaml.
 INFRA_YAML=$(curl -sf "$FORGEJO_RAW_URL")
 if [ -z "$INFRA_YAML" ]; then
   echo "ERROR: Could not fetch conf/infrastructure.yaml from $FORGEJO_RAW_URL" >&2
@@ -48,9 +49,12 @@ TF_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.tools.terraform' -)
 VAULT_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.tools.vault_cli' -)
 KUBECTL_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.tools.kubectl' -)
 
+# yq prints the literal string "null" for a missing key, so reject both empty
+# and "null" — a missing/misnamed field (e.g. a stale remote before the push)
+# must fail the build loudly, not bake in "null" versions.
 for V in NATS_CLI_VERSION TF_VERSION VAULT_VERSION KUBECTL_VERSION; do
-  if [ -z "${!V}" ]; then
-    echo "ERROR: Could not read $V from conf/infrastructure.yaml" >&2
+  if [ -z "${!V}" ] || [ "${!V}" = "null" ]; then
+    echo "ERROR: Could not read $V from $FORGEJO_RAW_URL (is the tools block pushed?)" >&2
     exit 1
   fi
 done
