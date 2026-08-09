@@ -40,8 +40,10 @@ terraform {
   }
 
   # State is stored in MinIO (S3-compatible object storage) instead of a local
-  # file. Remote state lets the CI pipeline share one state file, and the
-  # MinIO buckets are the same ones used for the golden VM images.
+  # file. Remote state lets the CI pipeline share one state file across runs and
+  # across machines (local control machine and the Forgejo runner). The MinIO
+  # server itself runs on the pfSense VM host, independent of the golden-image
+  # VM storage in Proxmox.
   backend "s3" {
     bucket                      = "tf-state"
     key                         = "proxmox-vms/terraform.tfstate"

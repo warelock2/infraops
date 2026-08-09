@@ -1,4 +1,6 @@
-FROM docker.io/alpine:latest
+# Pinned so rebuilds are reproducible: the alpine release's immutable repo
+# determines the apk-provided tools (python3 3.14.x, curl, jq, etc.).
+FROM docker.io/alpine:3.24.1
 
 ARG TF_VERSION=1.7.5
 ARG VAULT_VERSION=1.17.3
@@ -13,12 +15,12 @@ RUN retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "WARN: retrying in 1
 # --- pip packages (cached independently; no binary/tool dependency) ---
 # ansible-core (core only, no bundled collections)
 RUN retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "WARN: retrying in 10s..." && sleep 10; done; return 1; } && \
-    retry pip3 install --break-system-packages --no-cache-dir ansible-core && \
+    retry pip3 install --break-system-packages --no-cache-dir ansible-core==2.21.2 && \
     # no-deps: deps already satisfied by apk or ansible-core
     retry pip3 install --break-system-packages --no-cache-dir --no-deps \
-      hvac pfsense-vshell && \
+      hvac==2.4.0 pfsense-vshell==2.2.4 && \
     # check-jsonschema pulls its own deps (click, jsonschema, referencing)
-    retry pip3 install --break-system-packages --no-cache-dir check-jsonschema && \
+    retry pip3 install --break-system-packages --no-cache-dir check-jsonschema==0.37.4 && \
     # cleanup (kept in the same layer so it's cached together)
     rm -rf /usr/lib/python3.*/site-packages/ansible_test \
            /usr/lib/python3.*/site-packages/pip \
@@ -35,7 +37,7 @@ RUN retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "WARN: retrying in 1
 # Downloaded once; subsequent builds reuse this cached layer unless a version
 # ARG changes.
 RUN retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "WARN: retrying in 10s..." && sleep 10; done; return 1; } && \
-    retry wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq && \
+    retry wget -q https://github.com/mikefarah/yq/releases/download/v4.53.3/yq_linux_amd64 -O /usr/local/bin/yq && \
     chmod 755 /usr/local/bin/yq && \
     yq -V | grep -q mikefarah || { echo "ERROR: wrong yq"; exit 1; } && \
     retry curl -sL "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip" \

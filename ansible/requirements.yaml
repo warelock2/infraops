@@ -6,11 +6,18 @@
 # Install with:
 #   ansible-galaxy collection install -r requirements.yaml
 # The ci-base image runs this at build time so CI always has them.
+#
+# Versions are pinned to exact releases for reproducible builds; bump them
+# deliberately when the playbooks need newer features.
 # ===========================================================================
 collections:
-  - community.general
-  - community.hashi_vault
-  - ansible.posix
-  - kubernetes.core
-  - pfsensible.core
-  - pfrest.pfsense
+  - name: community.general
+    version: "13.2.0"
+  - name: community.hashi_vault
+    version: "7.1.0"
+  - name: ansible.posix
+    version: "2.2.2"
+  - name: kubernetes.core
+    version: "6.5.0"
+  - name: pfrest.pfsense
+    version: "0.0.13"
