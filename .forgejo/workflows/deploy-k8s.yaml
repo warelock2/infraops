@@ -53,9 +53,9 @@ jobs:
             SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}" &&
             ansible-playbook -i ansible/inventory.json ansible/playbooks/k8s-cluster.yaml
             --private-key /tmp/ansible_key
-            -e infra_platform_kubernetes_version=$(yq .platform.kubernetes.version conf/infrastructure.yaml)
+            -e infra_platform_kubernetes_version=$(yq .tools.kubernetes conf/infrastructure.yaml)
             -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr conf/infrastructure.yaml)
-            -e infra_platform_kubernetes_calico_version=$(yq .platform.kubernetes.calico_version conf/infrastructure.yaml)
+            -e infra_platform_kubernetes_calico_version=$(yq .tools.calico conf/infrastructure.yaml)
             -e infra_service_domain=$SERVICE_DOMAIN
             -e infra_admin_user=$(yq .platform.admin.user conf/infrastructure.yaml)
             -e infra_admin_group=$(yq .platform.admin.group conf/infrastructure.yaml)

@@ -43,10 +43,10 @@ if [ -z "$INFRA_YAML" ]; then
   exit 1
 fi
 
-NATS_CLI_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.platform.nats.cli_version' -)
-TF_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.platform.terraform.version' -)
-VAULT_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.platform.vault.cli_version' -)
-KUBECTL_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.platform.kubernetes.kubectl_version' -)
+NATS_CLI_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.tools.nats_cli' -)
+TF_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.tools.terraform' -)
+VAULT_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.tools.vault_cli' -)
+KUBECTL_VERSION=$(printf '%s' "$INFRA_YAML" | yq -p yaml '.tools.kubectl' -)
 
 for V in NATS_CLI_VERSION TF_VERSION VAULT_VERSION KUBECTL_VERSION; do
   if [ -z "${!V}" ]; then

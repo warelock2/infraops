@@ -31,7 +31,7 @@ echo "=== Reading NTfy channel from Vault ==="
 NTFY_CHANNEL=$(vault kv get -field=message_channel_phone secret/infraops/ntfy)
 
 echo "=== Verifying kubectl version matches config ==="
-K8S_VERSION=$(yq .platform.kubernetes.version conf/infrastructure.yaml)
+K8S_VERSION=$(yq .tools.kubernetes conf/infrastructure.yaml)
 BAKED_KUBECTL=$(kubectl version --client -o yaml | yq .clientVersion.gitVersion)
 case "$BAKED_KUBECTL" in
   *"$K8S_VERSION"*) ;;
@@ -76,9 +76,9 @@ GIT_TAG="${GITHUB_REF_NAME}"
 
 ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml \
   --private-key /tmp/ansible_key \
-  -e infra_platform_kubernetes_version=$(yq .platform.kubernetes.version conf/infrastructure.yaml) \
+  -e infra_platform_kubernetes_version=$(yq .tools.kubernetes conf/infrastructure.yaml) \
   -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr conf/infrastructure.yaml) \
-  -e infra_platform_kubernetes_calico_version=$(yq .platform.kubernetes.calico_version conf/infrastructure.yaml) \
+  -e infra_platform_kubernetes_calico_version=$(yq .tools.calico conf/infrastructure.yaml) \
   -e infra_service_domain=$SERVICE_DOMAIN \
   -e infra_admin_user=$(yq .platform.admin.user conf/infrastructure.yaml) \
   -e infra_admin_group=$(yq .platform.admin.group conf/infrastructure.yaml) \

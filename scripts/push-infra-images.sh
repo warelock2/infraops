@@ -34,10 +34,10 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$K8S_VERSION" ]; then
-  K8S_VERSION="v$(yq '.platform.kubernetes.version' conf/infrastructure.yaml)"
+  K8S_VERSION="v$(yq '.tools.kubernetes' conf/infrastructure.yaml)"
 fi
 if [ -z "$CALICO_VERSION" ]; then
-  CALICO_VERSION="$(yq '.platform.kubernetes.calico_version' conf/infrastructure.yaml)"
+  CALICO_VERSION="$(yq '.tools.calico' conf/infrastructure.yaml)"
   case "$CALICO_VERSION" in
     v*) ;;
     *) CALICO_VERSION="v${CALICO_VERSION}" ;;

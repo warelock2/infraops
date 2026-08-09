@@ -13,7 +13,7 @@ yq -V | grep -q mikefarah || { echo "ERROR: wrong yq"; exit 1; }
 ansible-galaxy collection install -r ansible/requirements.yaml
 
 # Extract values from conf/infrastructure.yaml
-TF_VERSION=$(yq '.platform.terraform.version' conf/infrastructure.yaml)
+TF_VERSION=$(yq '.tools.terraform' conf/infrastructure.yaml)
 SERVICE_HOST=$(yq '.defaults.service_host' conf/infrastructure.yaml)
 DNS_DOMAIN=$(yq '.platform.proxmox.dns_domain' conf/infrastructure.yaml)
 SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}"
@@ -57,9 +57,9 @@ cd ..
 
 ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml \
   --private-key /tmp/ansible_key \
-  -e "infra_platform_kubernetes_version=$(yq '.platform.kubernetes.version' conf/infrastructure.yaml)" \
+  -e "infra_platform_kubernetes_version=$(yq '.tools.kubernetes' conf/infrastructure.yaml)" \
   -e "infra_platform_kubernetes_pod_network_cidr=$(yq '.platform.kubernetes.pod_network_cidr' conf/infrastructure.yaml)" \
-  -e "infra_platform_kubernetes_calico_version=$(yq '.platform.kubernetes.calico_version' conf/infrastructure.yaml)" \
+  -e "infra_platform_kubernetes_calico_version=$(yq '.tools.calico' conf/infrastructure.yaml)" \
   -e "infra_service_domain=$SERVICE_DOMAIN" \
   -e "infra_admin_user=$ADMIN_USER" \
   -e "infra_admin_group=$ADMIN_GROUP" \
