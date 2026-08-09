@@ -52,6 +52,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     echo "=== NO NEW VMs - skipping readiness wait ==="
     echo "ready=true" >> "$GITHUB_OUTPUT"
     echo "failed_vms=" >> "$GITHUB_OUTPUT"
+    echo "created_vms=" >> "$GITHUB_OUTPUT"
     exit 0
   fi
 
@@ -63,6 +64,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     echo "=== ALL VMs READY ==="
     echo "ready=true" >> "$GITHUB_OUTPUT"
     echo "failed_vms=" >> "$GITHUB_OUTPUT"
+    echo "created_vms=$EXPECTED_VMS" >> "$GITHUB_OUTPUT"
     exit 0
   fi
 

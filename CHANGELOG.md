@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Admin SSH keys via IaC** — `warelock@spacedock` public key tracked in `ansible/files/` and provisioned to every warelock account by a repo-tracked `authorized_key` task (no more secret-only or manual key distribution)
 - **Odd control-plane quorum rule** — `clusters[].control_plane.nodes` must be odd (e.g. 1, 3, or 5) so etcd voting can't deadlock; even counts fail schema validation. The doc generator renders `not:` constraints into `SCHEMA_REFERENCE.md`
+- **`iac` VM tag lifecycle** — Terraform stamps every new VM with the `iac` tag at creation; the last workflow step (`scripts/clear-iac-tags.sh`) removes it only from the VMs this run created/replaced (`created_vms` from `terraform-apply-with-readiness.sh`), and only after the whole run succeeded — so VMs affected by a failed workflow stay visibly tagged in the Proxmox UI. IaC owns the tag outright (no snapshot/restore of prior tag state); other tags are preserved. `tags` is in `lifecycle.ignore_changes` so Terraform never fights the clear
 
 ### Changed
 - **Derived host FQDNs** — `connection.host` in `conf/infrastructure.yaml` is now an optional override; FQDNs default to `<name>.<dns_domain>` and are derived consistently in `generate-inventory.py`, `terraform/outputs.tf`, and vault-URL playbook lookups (kills the stale-`test01.localdomain` class of bug)

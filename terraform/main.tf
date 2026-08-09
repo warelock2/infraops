@@ -309,6 +309,12 @@ resource "proxmox_virtual_environment_vm" "vm" {
   node_name = local.proxmox_target_node
   vm_id     = each.value.vm_id
 
+  # The "iac" tag marks the VM as affected by the current IaC run. It is applied
+  # at creation and cleared by scripts/clear-iac-tags.sh once the workflow has
+  # fully succeeded; a failed run leaves the tag so the affected VMs are visible
+  # in Proxmox. tags is in ignore_changes so Terraform never fights the clear.
+  tags = ["iac"]
+
   lifecycle {
     precondition {
       condition     = each.value.vm_id > 0
@@ -320,7 +326,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
       error_message = "VM ID overlap detected: ${join(", ", [for v in local.vm_id_overlap_violations : v.message])}"
     }
 
-    ignore_changes = [initialization]
+    ignore_changes = [initialization, tags]
   }
 
   # QEMU guest agent gives Proxmox clean shutdown + guest info. wait_for_ip is
@@ -437,6 +443,12 @@ resource "proxmox_virtual_environment_vm" "standalone" {
   node_name = local.proxmox_target_node
   vm_id     = local.standalone_vm_ids[each.key]
 
+  # The "iac" tag marks the VM as affected by the current IaC run. It is applied
+  # at creation and cleared by scripts/clear-iac-tags.sh once the workflow has
+  # fully succeeded; a failed run leaves the tag so the affected VMs are visible
+  # in Proxmox. tags is in ignore_changes so Terraform never fights the clear.
+  tags = ["iac"]
+
   lifecycle {
     precondition {
       condition     = local.standalone_vm_ids[each.key] > 0
@@ -448,7 +460,7 @@ resource "proxmox_virtual_environment_vm" "standalone" {
       error_message = "VM ID overlap detected: ${join(", ", [for v in local.vm_id_overlap_violations : v.message])}"
     }
 
-    ignore_changes = [initialization]
+    ignore_changes = [initialization, tags]
   }
 
   agent {
