@@ -9,11 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Admin SSH keys via IaC** — `warelock@spacedock` public key tracked in `ansible/files/` and provisioned to every warelock account by a repo-tracked `authorized_key` task (no more secret-only or manual key distribution)
+- **Odd control-plane quorum rule** — `clusters[].control_plane.nodes` must be odd (e.g. 1, 3, or 5) so etcd voting can't deadlock; even counts fail schema validation. The doc generator renders `not:` constraints into `SCHEMA_REFERENCE.md`
 
 ### Changed
 - **Derived host FQDNs** — `connection.host` in `conf/infrastructure.yaml` is now an optional override; FQDNs default to `<name>.<dns_domain>` and are derived consistently in `generate-inventory.py`, `terraform/outputs.tf`, and vault-URL playbook lookups (kills the stale-`test01.localdomain` class of bug)
 - **Worker plane**: mushroom workers back to 2 (`worker-03` removed)
 - `scripts/viinfra`: prompts to commit+push after successful validation (default message "Updated SSOT"), prints validation errors immediately on failure, blank-line separation between output sections
+
+### Fixed
+- **DHCP ghost-lease cleanup order** — `restart-pfsense-dhcp.sh` and the workflow step now verify DNS, DELETE surviving ghost leases first (stop dhcpd → sed `dhcpd.leases`), and only THEN restart dhcpd so Unbound is rebuilt against a clean leases file. Restarting first re-registered the ghosts still in the file. Step renamed to "Delete Ghost DHCP Leases and Restart pfSense DHCP"
 
 ## [0.4.0] - 2026-08-09
 
