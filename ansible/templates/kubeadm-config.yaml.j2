@@ -2,8 +2,11 @@
    Rendered per-node by k8s-cluster.yaml Play 5. Three documents:
    InitConfiguration  -> API server binds :6444 locally (haproxy fronts :6443)
    ClusterConfiguration -> cluster-wide: version, image registry, control
-     plane endpoint (the VIP/haproxy DNS name), pod CIDR, and OIDC flags so
-     the API server validates Keycloak tokens with the groups claim.
+      plane endpoint (the VIP/haproxy DNS name), pod CIDR, and OIDC flags so
+      the API server validates Keycloak tokens with the groups claim. The
+      issuer ({{ oidc_issuer_url }}) is served by the Let's Encrypt *.afobl.com
+      wildcard, so no oidc-ca-file pin is set — the API server validates it
+      against the system CA store.
    KubeletConfiguration -> systemd cgroup driver (matches containerd).
    All values come from group_vars/extra-vars, never hardcoded. #}
 apiVersion: kubeadm.k8s.io/v1beta4
@@ -35,8 +38,6 @@ apiServer:
       value: preferred_username
     - name: oidc-groups-claim
       value: groups
-    - name: oidc-ca-file
-      value: /etc/kubernetes/pki/oidc-ca.pem
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration

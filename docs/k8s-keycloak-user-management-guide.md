@@ -219,4 +219,4 @@ The API server only validates against its own `--oidc-client-id`, so a token for
 | Remove user from group | Keycloak → Users → click user → Groups → Leave |
 | Map group to K8s role | Apply ClusterRoleBinding on the target cluster |
 | Force re-auth | `rm -rf ~/.kube/cache` then run `kubectl get nodes` |
-| Check token claims | `kubelogin get-token --grant-type=device-code --oidc-client-id=kubernetes-cli --oidc-issuer-url=https://keycloak.afobl.com/realms/infraops --certificate-authority=~/.kube/oidc-ca.pem` and decode the JWT |
+| Check token claims | `kubelogin get-token --grant-type=device-code --oidc-client-id=kubernetes-mushroom --oidc-issuer-url=https://keycloak.afobl.com/realms/infraops` and decode the JWT (no `--certificate-authority` — the issuer uses the Let's Encrypt wildcard, so the system CA store is trusted) |

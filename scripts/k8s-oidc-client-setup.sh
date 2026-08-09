@@ -4,9 +4,11 @@
 #
 # The k8s cluster's API server validates Keycloak tokens (kubeadm-config
 # wires oidc-* flags). This script sets up the LOCAL side: installs kubectl/
-# kubelogin/kubectx if missing, resolves the API server + cluster CA, installs
-# the Keycloak OIDC CA for token verification, and writes kubeconfig entries
-# so `kubectl` transparently runs the OIDC device/pkce flow when you login.
+# kubelogin/kubectx if missing, resolves the API server + cluster CA, and
+# writes kubeconfig entries so `kubectl` transparently runs the OIDC device/
+# pkce flow when you login. Token verification uses the system CA store —
+# the issuer (keycloak.afobl.com) is served by the Let's Encrypt *.afobl.com
+# wildcard, so no custom CA pin is needed.
 #
 # Usage: k8s-oidc-client-setup.sh <cluster_name> [--server=<url>] [--ca-file=<path>]
 # ===========================================================================
@@ -16,7 +18,6 @@ set -euo pipefail
 OIDC_SERVER_NAME="keycloak.afobl.com"
 OIDC_SERVER_PORT="443"
 OIDC_REALM="infraops"
-OIDC_CA_FILE=""
 CLUSTER_SERVER=""
 CLUSTER_CA_FILE=""
 CLUSTER=""
@@ -42,9 +43,8 @@ Required:
 
 Optional:
   --oidc-server-name=<host>     Keycloak hostname          (default: keycloak.afobl.com)
-  --oidc-server-port=<port>     Keycloak port              (default: 8443)
+  --oidc-server-port=<port>     Keycloak port              (default: 443)
   --oidc-realm=<realm>          Keycloak realm             (default: infraops)
-  --oidc-ca-file=<path>         OIDC CA cert path          (auto-detected if omitted)
   --server=<url>                K8s API server URL         (auto-resolved via DNS if omitted)
   --ca-file=<path>              Cluster CA cert path       (auto-detected from kubeconfig)
   -h, --help                    Show this help
@@ -65,7 +65,6 @@ parse_args() {
       --oidc-server-name=*) OIDC_SERVER_NAME="${1#*=}" ;;
       --oidc-server-port=*) OIDC_SERVER_PORT="${1#*=}" ;;
       --oidc-realm=*)      OIDC_REALM="${1#*=}" ;;
-      --oidc-ca-file=*)    OIDC_CA_FILE="${1#*=}" ;;
       --server=*)          CLUSTER_SERVER="${1#*=}" ;;
       --ca-file=*)         CLUSTER_CA_FILE="${1#*=}" ;;
       -h|--help)           usage ;;
@@ -145,38 +144,6 @@ install_kubectx() {
   info "kubectx installed"
 }
 
-# --- Resolve OIDC CA cert ---
-resolve_oidc_ca() {
-  local candidates=()
-
-  [[ -n "$OIDC_CA_FILE" ]] && candidates+=("$OIDC_CA_FILE")
-  candidates+=("./oidc-ca.pem")
-  candidates+=("./ansible/files/oidc-ca.pem")
-  candidates+=("${HOME}/.kube/oidc-ca.pem")
-
-  for f in "${candidates[@]}"; do
-    if [[ -f "$f" ]]; then
-      info "OIDC CA cert found: ${f}"
-      OIDC_CA_RESOLVED="$f"
-      return
-    fi
-  done
-
-  # Fetch from Keycloak server
-  info "OIDC CA cert not found locally, fetching from Keycloak..."
-  local issuer_url="https://${OIDC_SERVER_NAME}:${OIDC_SERVER_PORT}"
-  OIDC_CA_RESOLVED=$(mktemp)
-  openssl s_client -connect "${OIDC_SERVER_NAME}:${OIDC_SERVER_PORT}" -showcerts </dev/null 2>/dev/null \
-    | openssl x509 -outform PEM > "$OIDC_CA_RESOLVED" 2>/dev/null
-
-  if [[ ! -s "$OIDC_CA_RESOLVED" ]]; then
-    rm -f "$OIDC_CA_RESOLVED"
-    die "Could not fetch OIDC CA cert from ${issuer_url}. Provide --oidc-ca-file=<path>."
-  fi
-
-  info "OIDC CA cert fetched from ${issuer_url}"
-}
-
 # --- Resolve K8s API server ---
 resolve_cluster_server() {
   if [[ -n "$CLUSTER_SERVER" ]]; then
@@ -233,21 +200,6 @@ resolve_cluster_ca() {
   die "Cluster CA cert not found. Provide --ca-file=<path>."
 }
 
-# --- Copy OIDC CA cert ---
-install_oidc_ca() {
-  local target="${HOME}/.kube/oidc-ca.pem"
-  mkdir -p "${HOME}/.kube"
-
-  if [[ "$OIDC_CA_RESOLVED" == "$target" ]]; then
-    info "OIDC CA cert already at ${target}"
-    return
-  fi
-
-  cp "$OIDC_CA_RESOLVED" "$target"
-  chmod 600 "$target"
-  info "OIDC CA cert installed to ${target}"
-}
-
 # --- Configure kubeconfig ---
 configure_kubeconfig() {
   local ctx_oidc="${CLUSTER}"
@@ -284,18 +236,27 @@ configure_kubeconfig() {
     fi
   fi
 
-  # Add OIDC user
+  # Add OIDC user. The issuer must match the discovery document exactly: on
+  # the default port 443 the URL carries no port (the Let's Encrypt proxy
+  # serves keycloak.afobl.com and Keycloak issues the no-port issuer), which
+  # is what the API server's oidc-issuer-url expects.
+  local oidc_issuer
+  if [[ "${OIDC_SERVER_PORT}" == "443" ]]; then
+    oidc_issuer="https://${OIDC_SERVER_NAME}/realms/${OIDC_REALM}"
+  else
+    oidc_issuer="https://${OIDC_SERVER_NAME}:${OIDC_SERVER_PORT}/realms/${OIDC_REALM}"
+  fi
+
   kubectl config set-credentials "$user_oidc" \
     --exec-api-version=client.authentication.k8s.io/v1beta1 \
     --exec-command=kubectl \
     --exec-arg=oidc-login \
     --exec-arg=get-token \
-    --exec-arg=--oidc-issuer-url="https://${OIDC_SERVER_NAME}:${OIDC_SERVER_PORT}/realms/${OIDC_REALM}" \
+    --exec-arg=--oidc-issuer-url="${oidc_issuer}" \
     --exec-arg=--oidc-client-id="kubernetes-${CLUSTER}" \
     --exec-arg=--oidc-client-secret="" \
-    --exec-arg=--certificate-authority="${HOME}/.kube/oidc-ca.pem" \
     --exec-arg=--oidc-extra-scope=groups
-  info "OIDC user '${user_oidc}' configured"
+  info "OIDC user '${user_oidc}' configured (issuer: ${oidc_issuer})"
 
   # Add OIDC context
   kubectl config set-context "$ctx_oidc" \
@@ -320,7 +281,6 @@ switch_context() {
 
 # --- Cleanup temp files ---
 cleanup() {
-  [[ -f "${OIDC_CA_RESOLVED:-}" && "${OIDC_CA_RESOLVED}" != "${HOME}/.kube/oidc-ca.pem" ]] && rm -f "$OIDC_CA_RESOLVED"
   [[ -f "${CLUSTER_CA_FILE:-}" && ! -f "${CLUSTER_CA_FILE}" ]] && rm -f "$CLUSTER_CA_FILE" 2>/dev/null
   # Don't clean up CLUSTER_CA_FILE if it was a temp file we created from kubeconfig
 }
@@ -346,11 +306,9 @@ main() {
   # Resolve endpoints
   resolve_cluster_server
   resolve_cluster_ca
-  resolve_oidc_ca
   echo ""
 
   # Configure
-  install_oidc_ca
   configure_kubeconfig
   echo ""
 
