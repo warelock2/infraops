@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-09
+
+### Added
+- **mushroom Kubernetes cluster** — new multi-node k8s workload (control-01 + workers, kubeadm/Calico/kube-vip) managed end-to-end by the enforce-iac pipeline; overlapping VMID ranges fixed so the cluster's VMs allocate cleanly
+- **Worker-plane lifecycle**: `conf/infrastructure.yaml` now drives worker count; expanded by one (`worker-03`), shrunk by one, then re-expanded — full apply + join + drain + orderly reboot cycle proven in CI
+- **SSOT version pinning** — all tool/build versions grouped under a new top-level `tools` block in `conf/infrastructure.yaml`; ci-base image and CI toolchain are now reproducible (schema updated, version patterns enforced with `latest` keyword support)
+- **Keycloak OIDC auth for k8s** — `kubernetes-mushroom` client with audience + group mappers (`mushroom-admins`/`mushroom-viewers`), token-only kubeconfig flow, RBAC bindings for cluster-admin and read-only access
+- **Docs**: Keycloak OIDC user management guide rewritten with a Basic Usage Workflow; README quick-start added
+
+### Changed
+- Keycloak admin user is now `warelock` (bootstrap `admin` removed)
+- `timeout = 28` and `pipelining = True` moved from `[ssh_connection]` to `[defaults]` in `ansible/ansible.cfg` — `[ssh_connection]` placement was silently ignored in ansible-core 2.17
+- K8s OIDC trust uses the system CA store (Let's Encrypt `*.afobl.com` wildcard) instead of a pinned self-signed CA
+- `scripts/k8s-oidc-client-setup.sh`: OIDC issuer built port-free on 443 (no `:8443`)
+
+### Fixed
+- CI become probe failed worker-02's post-join check by ~0.5s — `become_timeout` raised 12s → 30s
+- K8s drain step skipped whenever the control plane is unresolvable, unreachable, or not yet bootstrapped (no `admin.conf`) instead of failing a brand-new/destroyed cluster
+- Out-of-pool DHCP ghost lease could become a VM's static netplan IP — allocator now refuses out-of-pool answers
+- Readiness gate derived the expected VM IP from the IaC-injected netplan instead of the VM's runtime self-capture (which raced the DHCP→static switch)
+- Keycloak audience mapper key corrected to `included.custom.audience` (the prior camelCase key was silently ignored)
+- CI fails loudly when a pinned SSOT version key is missing
+
+### Removed
+- `test01` test host from `conf/infrastructure.yaml`
+- `ansible/files/oidc-ca.pem` (superseded by system CA trust)
+
+---
+
 ## [0.3.0] - 2026-08-07
 
 ### Added
@@ -156,11 +185,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## Upcoming
-
-### [0.3.0] - Planned
-- NATS metrics/monitoring documentation
-- Automated Proxmox snippet update via CI/CD
-- Consider `--tlsca` support for NATS client tool
 
 ### [1.0.0] - Future
 - Stable API contract for Terraform modules / Ansible roles / script CLIs
