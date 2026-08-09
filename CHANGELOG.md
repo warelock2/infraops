@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Admin SSH keys via IaC** — `warelock@spacedock` public key tracked in `ansible/files/` and provisioned to every warelock account by a repo-tracked `authorized_key` task (no more secret-only or manual key distribution)
+
+### Changed
+- **Derived host FQDNs** — `connection.host` in `conf/infrastructure.yaml` is now an optional override; FQDNs default to `<name>.<dns_domain>` and are derived consistently in `generate-inventory.py`, `terraform/outputs.tf`, and vault-URL playbook lookups (kills the stale-`test01.localdomain` class of bug)
+- **Worker plane**: mushroom workers back to 2 (`worker-03` removed)
+- `scripts/viinfra`: prompts to commit+push after successful validation (default message "Updated SSOT"), prints validation errors immediately on failure, blank-line separation between output sections
+
 ## [0.4.0] - 2026-08-09
 
 ### Added
