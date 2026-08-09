@@ -155,7 +155,7 @@
               access.token.claim: true
               id.token.claim: false
               introspection.token.claim: true
-              includedCustomAudience: "kubernetes-{{ item }}"
+              included.custom.audience: "kubernetes-{{ item }}"
         state: present
       loop: "{{ cluster_names }}"
 
