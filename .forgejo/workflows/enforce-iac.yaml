@@ -13,10 +13,10 @@
 #      only the VMs this plan CREATES/REPLACES signal on NATS. The step
 #      outputs ready=true ONLY when every expected VM answered — the hard
 #      gate before Ansible config-management runs.
-#   5. Restart pfSense DHCP + verify DNS is clean (restart-pfsense-dhcp.sh):
-#      flushes the ghost lease registrations left by each VM's boot-window
-#      DHCP lease and auto-deletes any that survive, so Ansible never sees
-#      polluted DNS.
+#   5. Clean DNS (restart-pfsense-dhcp.sh): verify every provisioned VM
+#      resolves only to in-pool IPs, and when a boot-window ghost lease left
+#      a stale registration, delete the ghost lease FIRST then restart pfSense
+#      DHCP so Unbound is rebuilt clean — Ansible never sees polluted DNS.
 #   6. Generate the Ansible inventory and run site.yaml (k8s-cluster plays).
 #
 # The many `if:` conditions on `steps.apply-wait.outputs.ready == 'true'`
@@ -196,13 +196,14 @@ jobs:
       # holds a short DHCP lease during its boot window; the VM now releases
       # it during the DHCP->static switch (cloud-init runcmd), but the stale
       # DNS registration survives until the DHCP service restarts and
-      # dhcpleases rewrites Unbound. This step restarts pfSense DHCP, verifies
-      # every provisioned VM resolves only to in-pool IPs, and auto-deletes
-      # any out-of-pool "ghost" leases that survived (stop dhcpd -> sed the
-      # lease block -> apply -> re-verify). It only fails if a ghost persists
+      # dhcpleases rewrites Unbound. This step verifies every provisioned VM
+      # resolves only to in-pool IPs, and when out-of-pool "ghost" answers
+      # exist it DELETES those leases FIRST (stop dhcpd -> sed the lease
+      # block) and THEN restarts DHCP so Unbound is rebuilt against a clean
+      # leases file, then re-verifies. It only fails if a ghost persists
       # after deletion, so Ansible below never runs against polluted DNS.
       # ---------------------------------------------------------------------
-      - name: Restart pfSense DHCP and Auto-Delete Ghost Leases
+      - name: Delete Ghost DHCP Leases and Restart pfSense DHCP
         if: github.ref == 'refs/heads/master' && steps.apply-wait.outputs.ready == 'true' && steps.changes.outputs.changed == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
