@@ -1,7 +1,7 @@
 #!/bin/sh
 # ===========================================================================
-# Restart the pfSense DHCP service and verify DNS is clean afterwards,
-# auto-deleting any ghost DHCP leases that survived the restart.
+# Restart the pfSense DHCP service after deleting any ghost DHCP leases, so
+# DNS ends up clean (the restart regenerates Unbound from dhcpd.leases).
 #
 # Why: a freshly cloned VM holds a short DHCP lease during its boot window
 # (before cloud-init applies the static netplan). The VM now releases that
@@ -13,16 +13,17 @@
 # Ansible only ever sees unpolluted DNS.
 #
 #   1. Read the pfSense API key from Vault.
-#   2. POST /api/v2/services/dhcp_server/apply — restarts dhcpd; dhcpleases
-#      regenerates Unbound from the (now lease-free) leases file.
-#   3. Verify every provisioned VM FQDN resolves to ONLY IPs inside the IaC
+#   2. Verify every provisioned VM FQDN resolves to ONLY IPs inside the IaC
 #      pool (192.168.0.40-49).
-#   4. If any out-of-pool ("ghost") answer survived the restart, DELETE each
-#      ghost lease from dhcpd.leases (stop dhcpd -> sed the lease block ->
-#      POST apply — the same sequence proven in
-#      ansible/playbooks/tasks/delete-lease.yaml) and re-verify. The step
-#      only fails if a ghost persists after deletion, so the pipeline
-#      self-heals transient DNS pollution instead of stopping the show.
+#   3. If any out-of-pool ("ghost") answer exists, DELETE each ghost lease
+#      from dhcpd.leases (stop dhcpd -> sed the lease block) BEFORE the
+#      restart. Restarting first would just re-register the ghost, since
+#      dhcpleases rebuilds Unbound from the leases file.
+#   4. THEN restart dhcpd (POST /api/v2/services/dhcp_server/apply) so
+#      dhcpleases regenerates Unbound from the now-clean leases file, and
+#      re-verify. The step only fails if a ghost persists after deletion,
+#      so the pipeline self-heals transient DNS pollution instead of
+#      stopping the show.
 #
 # Usage:
 #   VAULT_TOKEN=... sh scripts/restart-pfsense-dhcp.sh
@@ -51,21 +52,6 @@ if [ -z "$PFSENSE_HOST" ] || [ -z "$POOL_START" ] || [ -z "$POOL_END" ]; then
   exit 1
 fi
 echo "pfSense host: $PFSENSE_HOST  pool: $POOL_START-$POOL_END"
-
-echo "=== Restarting pfSense DHCP service (apply) ==="
-HTTP_CODE=$(curl -k -sS -o /tmp/dhcp_apply.json -w '%{http_code}' \
-  -X POST \
-  -H "x-api-key: $PFSENSE_API_KEY" \
-  "https://$PFSENSE_HOST/api/v2/services/dhcp_server/apply")
-echo "apply HTTP $HTTP_CODE"
-[ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "202" ] || {
-  echo "ERROR: DHCP apply failed (HTTP $HTTP_CODE)" >&2
-  cat /tmp/dhcp_apply.json >&2 || true
-  exit 1
-}
-
-echo "=== Waiting for DHCP/DNS to settle ==="
-sleep 5
 
 echo "=== Collecting provisioned VM FQDNs ==="
 PROVISIONED_FQDNS=$(python3 - "$INFRA" <<'PYEOF'
@@ -208,7 +194,7 @@ if verify_dns; then
   exit 0
 fi
 
-echo "=== Auto-deleting ghost DHCP leases that survived the restart ==="
+echo "=== Auto-deleting ghost DHCP leases found by DNS check ==="
 for ghost_ip in $GHOST_IPS; do
   delete_ghost_lease "$ghost_ip"
 done
