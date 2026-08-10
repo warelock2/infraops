@@ -12,12 +12,18 @@
 #   4. Apply + wait for readiness (terraform-apply-with-readiness.sh):
 #      only the VMs this plan CREATES/REPLACES signal on NATS. The step
 #      outputs ready=true ONLY when every expected VM answered — the hard
-#      gate before Ansible config-management runs.
+#      gate before Ansible config-management runs. It also stamps the "iac"
+#      state-drift tag on every VM the plan changed (create/replace/update).
 #   5. Clean DNS (restart-pfsense-dhcp.sh): verify every provisioned VM
 #      resolves only to in-pool IPs, and when a boot-window ghost lease left
 #      a stale registration, delete the ghost lease FIRST then restart pfSense
 #      DHCP so Unbound is rebuilt clean — Ansible never sees polluted DNS.
 #   6. Generate the Ansible inventory and run site.yaml (k8s-cluster plays).
+#      Ansible stamps "iac" on the hosts its recap reports as changed.
+#   7. LAST STEP, Clear IaC Tags: removes "iac" from the UNION of the
+#      Terraform-drifted and Ansible-drifted host sets only — any other
+#      tagged host is left alone. No if: gate: fail-fast means reaching it
+#      implies the whole run succeeded.
 #
 # The many `if:` conditions on `steps.apply-wait.outputs.ready == 'true'`
 # are what guarantee Ansible never touches a half-booted VM.
@@ -229,6 +235,7 @@ jobs:
             sh -c "python3 scripts/generate-inventory.py --output ansible/inventory.json"
 
       - name: Configuration Management
+        id: config-mgmt
         if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_config_management == 'true' && steps.apply-wait.outputs.ready == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
@@ -239,20 +246,27 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       # ---------------------------------------------------------------------
-      # Clear the "iac" tag set by Terraform at VM creation, ONLY on the VMs
-      # this run created/replaced (steps.apply-wait.outputs.created_vms).
-      # This is deliberately the LAST step: fail-fast means it only runs when
-      # the whole run (apply + readiness + config management) succeeded, so a
-      # failed run leaves the tag in place and the affected VMs stay visible
-      # in the Proxmox UI. Any future post-Ansible tools go before this step.
+      # Clear the "iac" state-drift tag from EXACTLY the hosts that drifted
+      # this run: the union of the VMs Terraform changed (apply-wait output
+      # terraform_drifted) and the hosts Ansible config management changed
+      # (config-mgmt output ansible_drifted). Any OTHER host still carrying
+      # the tag (e.g. from an earlier failed run) is left alone - it was not
+      # touched this run.
+      #
+      # This is deliberately the LAST step with NO if: gate. Fail-fast means
+      # reaching this step already implies the whole run (apply + readiness +
+      # config management) succeeded, so a failed run leaves the tags in place
+      # and the drifted hosts stay visible in the Proxmox UI. On non-master
+      # manual dispatches apply-wait and config-mgmt are skipped, so both
+      # inputs are empty and this step is a no-op.
       # ---------------------------------------------------------------------
       - name: Clear IaC Tags
-        if: github.ref == 'refs/heads/master' && steps.apply-wait.outputs.ready == 'true' && steps.changes.outputs.changed == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: sh scripts/clear-iac-tags.sh
         env:
-          CREATED_VMS: ${{ steps.apply-wait.outputs.created_vms }}
+          TERRAFORM_DRIFTED: ${{ steps.apply-wait.outputs.terraform_drifted }}
+          ANSIBLE_DRIFTED: ${{ steps.config-mgmt.outputs.ansible_drifted }}
           VAULT_ADDR: https://vault.afobl.com
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}

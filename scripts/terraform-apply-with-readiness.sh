@@ -29,6 +29,23 @@ extract_created_vms() {
      | join(":")] | .[]'
 }
 
+# ---------------------------------------------------------------------------
+# Extract every VM Terraform will change for any reason (create, replace, or
+# in-place update) - i.e. every VM it detected state drift on. These get the
+# "iac" stamp after apply. Pure no-ops and pure destroys are excluded (a
+# destroyed VM no longer exists, so there is nothing to tag).
+#
+# Output: one "hostname:vmid" pair per line.
+# ---------------------------------------------------------------------------
+extract_drifted_vms() {
+  terraform -chdir=terraform show -json "$PLAN_FILE" | jq -r '
+    [.resource_changes[]
+     | select(.type == "proxmox_virtual_environment_vm")
+     | select((.change.actions | index("create")) or (.change.actions | index("update")))
+     | [((.index // .name)), ((.change.after.vm_id // .change.before.vm_id) | tostring)]
+     | join(":")] | .[]'
+}
+
 for RETRY in $(seq 1 "$MAX_RETRIES"); do
   echo "=== Attempt $RETRY/$MAX_RETRIES ==="
 
@@ -44,15 +61,27 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   EXPECTED_VMS=$(extract_created_vms | tr '\n' ' ')
   echo "VMs to create/replace: $EXPECTED_VMS"
 
+  # Every VM Terraform detected state drift on (create/replace OR in-place
+  # update) gets the "iac" stamp AFTER apply, so the drifted set stays visible
+  # in Proxmox for the rest of the run.
+  DRIFTED_VMS=$(extract_drifted_vms | tr '\n' ' ')
+  echo "VMs with state drift: $DRIFTED_VMS"
+
   # Apply the exact plan we inspected
   terraform -chdir=terraform apply -parallelism=1 "$PLAN_FILE"
+
+  if [ -n "$DRIFTED_VMS" ]; then
+    echo "=== Stamping iac tag on drifted VMs ==="
+    IAC_TARGETS="$DRIFTED_VMS" sh scripts/stamp-iac-tags.sh \
+      || echo "WARNING: failed to stamp iac tag on drifted VMs (cosmetic - continuing)"
+  fi
 
   # If nothing was created or replaced, no VM will signal — nothing to wait for
   if [ -z "$EXPECTED_VMS" ]; then
     echo "=== NO NEW VMs - skipping readiness wait ==="
     echo "ready=true" >> "$GITHUB_OUTPUT"
     echo "failed_vms=" >> "$GITHUB_OUTPUT"
-    echo "created_vms=" >> "$GITHUB_OUTPUT"
+    echo "terraform_drifted=$DRIFTED_VMS" >> "$GITHUB_OUTPUT"
     exit 0
   fi
 
@@ -64,7 +93,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     echo "=== ALL VMs READY ==="
     echo "ready=true" >> "$GITHUB_OUTPUT"
     echo "failed_vms=" >> "$GITHUB_OUTPUT"
-    echo "created_vms=$EXPECTED_VMS" >> "$GITHUB_OUTPUT"
+    echo "terraform_drifted=$DRIFTED_VMS" >> "$GITHUB_OUTPUT"
     exit 0
   fi
 

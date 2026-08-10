@@ -74,6 +74,7 @@ SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}"
 GIT_COMMIT="${GITHUB_SHA::8}"
 GIT_TAG="${GITHUB_REF_NAME}"
 
+ANSIBLE_LOG=/tmp/ansible-output.log
 ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml \
   --private-key /tmp/ansible_key \
   -e infra_platform_kubernetes_version=$(yq .tools.kubernetes conf/infrastructure.yaml) \
@@ -85,4 +86,23 @@ ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml \
   -e infra_ssh_key_file=/tmp/ssh_key.pub \
   -e git_commit=$GIT_COMMIT \
   -e git_tag=$GIT_TAG \
-  -e ntfy_message_channel=$NTFY_CHANNEL
+  -e ntfy_message_channel=$NTFY_CHANNEL >"$ANSIBLE_LOG" 2>&1
+ANSIBLE_STATUS=$?
+cat "$ANSIBLE_LOG"
+if [ "$ANSIBLE_STATUS" -ne 0 ]; then
+  echo "ERROR: ansible site playbook failed (exit $ANSIBLE_STATUS)" >&2
+  exit "$ANSIBLE_STATUS"
+fi
+
+echo "=== Detecting hosts whose state drifted (changed > 0) ==="
+ANSIBLE_DRIFTED=$(awk '/PLAY RECAP/{recap=1} recap && $2 == ":" && $0 ~ /changed=[1-9][0-9]*/ {print $1}' "$ANSIBLE_LOG" | sort -u | grep -v '^localhost$' | tr '\n' ' ')
+ANSIBLE_DRIFTED=$(echo "$ANSIBLE_DRIFTED" | sed 's/ *$//')
+echo "Hosts changed by config management: ${ANSIBLE_DRIFTED:-<none>}"
+if [ -n "$ANSIBLE_DRIFTED" ]; then
+  echo "=== Stamping iac tag on drifted hosts ==="
+  IAC_TARGETS="$ANSIBLE_DRIFTED" sh scripts/stamp-iac-tags.sh \
+    || echo "WARNING: failed to stamp iac tag on drifted hosts (cosmetic - continuing)"
+fi
+if [ -n "$GITHUB_OUTPUT" ]; then
+  echo "ansible_drifted=$ANSIBLE_DRIFTED" >> "$GITHUB_OUTPUT"
+fi
