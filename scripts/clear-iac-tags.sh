@@ -58,7 +58,7 @@ echo "Created/replaced this run: $CREATED_VMS"
 
 echo "=== Listing VMs on node $PROXMOX_NODE ==="
 VM_LIST=$(curl -k -sS -f \
-  -H "Authorization: Bearer $PROXMOX_TOKEN" \
+  -H "Authorization: PVEAPIToken=$PROXMOX_TOKEN" \
   "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu") || {
     echo "FATAL: could not list VMs on node $PROXMOX_NODE" >&2
     exit 1
@@ -84,13 +84,13 @@ echo "$VM_LIST" | jq -r --argjson created "$CREATED_JSON" '
 
   if [ -n "$NEW_TAGS" ]; then
     curl -k -sS -f -X PUT \
-      -H "Authorization: Bearer $PROXMOX_TOKEN" \
+      -H "Authorization: PVEAPIToken=$PROXMOX_TOKEN" \
       -d "tags=$NEW_TAGS" \
       "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VMID}/config" \
       >/dev/null 2>&1 || echo "  WARNING: failed to clear tag on VM $VMID"
   else
     curl -k -sS -f -X PUT \
-      -H "Authorization: Bearer $PROXMOX_TOKEN" \
+      -H "Authorization: PVEAPIToken=$PROXMOX_TOKEN" \
       -d "tags=" \
       "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VMID}/config" \
       >/dev/null 2>&1 || echo "  WARNING: failed to clear tag on VM $VMID"
