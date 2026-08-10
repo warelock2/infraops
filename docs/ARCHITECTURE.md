@@ -118,13 +118,19 @@ graph LR
         TF_INIT["terraform init"]
         TF_PLAN["terraform plan"]
         TF_APPLY["terraform apply"]
+        TF_STAMP["stamp iac tag on drifted VMs"]
         PVE["Proxmox VE"]
         DNS_ADD["pfSense DNS add"]
     end
 
     subgraph "Configuration Management"
-        ANSIBLE["ansible-playbook k8s-cluster.yaml"]
+        ANSIBLE["ansible-playbook site.yaml"]
+        ANSIBLE_STAMP["stamp iac tag on changed hosts"]
         K8S["Kubernetes Cluster"]
+    end
+
+    subgraph "Post-Run"
+        CLEAR["clear iac tag from drifted set"]
     end
 
     YAML --> CHECK
@@ -132,14 +138,48 @@ graph LR
     CHECK --> TF_INIT
     TF_INIT --> TF_PLAN
     TF_PLAN --> TF_APPLY
-    TF_APPLY --> PVE
-    TF_APPLY --> DNS_ADD
+    TF_APPLY --> TF_STAMP
+    TF_STAMP --> PVE
+    TF_STAMP --> DNS_ADD
     PVE --> ANSIBLE
     DNS_ADD --> ANSIBLE
+    ANSIBLE --> ANSIBLE_STAMP
     ANSIBLE --> K8S
+    ANSIBLE_STAMP --> CLEAR
+    TF_STAMP --> CLEAR
 ```
 
 `infrastructure.yaml` drives both systems independently. Terraform reads it for VM provisioning; Ansible reads it for configuration. DNS (pfSense Unbound) is the only coupling point — Terraform creates records, Ansible resolves FQDNs.
+
+Both actors stamp the `iac` state-drift tag on hosts they detect drift on (see [State Drift Tag](#state-drift-tag)). The tag is cleared from the combined drifted set only when the whole run succeeds.
+
+## State Drift Tag
+
+The `iac` tag is a **state-drift tag**: it marks a host as "IaC detected state drift here and acted on it." It is stamped by whichever actor detected the drift, stays visible in the Proxmox UI for the duration of the run, and is cleared only when the whole run succeeds.
+
+### Semantics
+
+| Tag state | Meaning |
+|-----------|---------|
+| `iac` present during a run | IaC detected state drift on this host and is/was acting on it. Check on it if the run didn't finish. |
+| `iac` present after a failed run | Drift was detected but the pipeline errored before the final cleanup — this host needs investigation. |
+| `iac` absent | Either the host never drifted, or a successful run acted on its drift and cleared the tag. |
+
+### Who stamps it
+
+- **Terraform** (`scripts/terraform-apply-with-readiness.sh` → `scripts/stamp-iac-tags.sh`) stamps every VM the plan changes — `create`, `replace` (`delete,create`), or in-place `update` (e.g. a RAM adjust). This includes a VM that was destroyed out-of-band and is restored as state drift: the plan reports it as `create`, so it is stamped and later cleared like any other drifted VM. Pure no-ops and pure destroys are excluded.
+- **Ansible** (`scripts/configuration-management.sh` → `scripts/stamp-iac-tags.sh`) stamps every inventory host whose play recap reports `changed > 0` — Ansible's own signal that its tasks modified the host's state.
+
+`stamp-iac-tags.sh` is idempotent and preserves any other tags on the host.
+
+### Who clears it
+
+The **last step** of `enforce-iac.yaml` (`scripts/clear-iac-tags.sh`) removes `iac` from the **union** of the two drifted sets — the VMs Terraform changed and the hosts Ansible changed — and only those. It has no `if:` gate: workflow steps fail fast, so reaching it implies the whole run (apply + readiness + config management) succeeded.
+
+This scoping is deliberate:
+
+- A host tagged by an **earlier failed run** but **not touched this run** keeps its tag — it was not acted on, so its drift signal stays visible for investigation.
+- Terraform checks every `infrastructure_provisioning` host for drift and Ansible checks every `configuration_management` host, but typically only a **subset** drifts in any given run. The tag and its clearing track that actual subset, not the whole managed fleet.
 
 ## CI/CD Pipeline
 
@@ -158,16 +198,17 @@ flowchart TD
     CLUSTERS --> DRAIN["K8s Drain Removed Nodes"]
     DRAIN --> FIX_PERMS["Fix Terraform Dir Permissions"]
     FIX_PERMS --> CONSUMER["Ensure Readiness Poller Consumer Exists"]
-    CONSUMER --> APPLY["Apply and Wait for Readiness<br/>NATS gate + failed-VM retries"]
+    CONSUMER --> APPLY["Apply and Wait for Readiness<br/>NATS gate + failed-VM retries<br/>stamp iac tag on drifted VMs"]
     APPLY --> DHCP["Restart pfSense DHCP<br/>auto-delete ghost leases"]
     DHCP --> GEN_INV["Generate Ansible Inventory"]
-    GEN_INV --> CONFIG_MGMT["Configuration Management<br/>ansible-playbook site.yaml"]
-    CONFIG_MGMT --> DONE([Complete])
+    GEN_INV --> CONFIG_MGMT["Configuration Management<br/>ansible-playbook site.yaml<br/>stamp iac tag on changed hosts"]
+    CONFIG_MGMT --> CLEAR["Clear IaC Tags<br/>remove iac from drifted set only"]
+    CLEAR --> DONE([Complete])
 ```
 
 ### Step Images
 
-Every step runs in the `forgejo.afobl.com/warelock/ci-base:latest` image (Terraform, Vault, NATS CLI, kubectl, yq, ansible-core + collections, provider mirror). Ansible only runs after the NATS readiness gate (`steps.apply-wait.outputs.ready == 'true'`) and a clean pfSense DHCP/DNS check, so it never touches a half-booted VM.
+Every step runs in the `forgejo.afobl.com/warelock/ci-base:latest` image (Terraform, Vault, NATS CLI, kubectl, yq, ansible-core + collections, provider mirror). Ansible only runs after the NATS readiness gate (`steps.apply-wait.outputs.ready == 'true'`) and a clean pfSense DHCP/DNS check, so it never touches a half-booted VM. `Clear IaC Tags` is deliberately the last step with no gate — reaching it implies the whole run succeeded (see [State Drift Tag](#state-drift-tag)).
 
 ## Security Model
 
@@ -209,6 +250,7 @@ graph LR
 | **Static IPs via pfSense Unbound** | Proxmox doesn't provide DHCP DNS registration. Static IPs + API-managed DNS records give reliable name resolution for Terraform and Ansible. |
 | **YAML in git as the database** | Git provides versioning, diffing, audit trail, RBAC, backup, rollback. All major IaC tools (Terraform, Ansible, Kubernetes, Helm) use this pattern. |
 | **`enforcement` tags** | `infrastructure_provisioning` → Terraform acts. `configuration_management` → Ansible acts. Both → Terraform creates, Ansible configures. Neither → ignored. |
+| **`iac` state-drift tag** | The `iac` tag marks "IaC detected state drift and acted on it." Terraform stamps the VMs its plan changes; Ansible stamps the hosts its recap reports as `changed > 0`. The last workflow step clears it from the union of both drifted sets only, so a host tagged by an earlier failed run stays visible until a future run actually acts on it. |
 | **One IP pool for all VMs** | `hosts[].ip_pool` (`.40-.59`) is the single pool for all IAC-managed static IPs. VIP is explicitly defined per cluster. |
 | **Single source of truth** | `infrastructure.yaml` drives everything. Given a validated file, host lists are fully deterministic for both Terraform and Ansible using the same naming convention: `{type}-{cluster}-{plane}-{nn}.{domain}`. |
 | **Immutable = opt-in** | `immutable` defaults to `false`. Existing hosts work without modification. When enabled, configuration management skips the host and a break-glass marker is monitored. |
