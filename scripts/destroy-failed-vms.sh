@@ -40,7 +40,7 @@ for entry in $FAILED_VMS; do
   # Stop VM first (required before destroy)
   echo "Stopping VM $HOSTNAME (VMID $VMID)..."
   curl -k -sS -f -X POST \
-    -H "Authorization: Bearer $PROXMOX_TOKEN" \
+    -H "Authorization: PVEAPIToken=$PROXMOX_TOKEN" \
     -w "\n  -> HTTP %{http_code}\n" \
     "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VMID}/status/stop" \
     && echo "  -> Stopped" \
@@ -53,7 +53,7 @@ for entry in $FAILED_VMS; do
 
   echo "Deleting VM $HOSTNAME (VMID $VMID) via Proxmox API..."
   curl -k -sS -f -X DELETE \
-    -H "Authorization: Bearer $PROXMOX_TOKEN" \
+    -H "Authorization: PVEAPIToken=$PROXMOX_TOKEN" \
     -w "\n  -> HTTP %{http_code}\n" \
     "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VMID}" \
     && echo "  -> Destroyed" \

@@ -103,7 +103,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     echo "Deleting VM $HOSTNAME via Proxmox API..."
     PROXMOX_NODE=$(yq ".platform.proxmox.node" conf/infrastructure.yaml)
     curl -k -sS -f -X DELETE \
-      -H "Authorization: Bearer $(vault kv get -field=api_token secret/infraops/proxmox)" \
+      -H "Authorization: PVEAPIToken=$(vault kv get -field=api_token secret/infraops/proxmox)" \
       -w "\n  -> HTTP %{http_code}\n" \
       "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VMID}" \
       && echo "  -> Destroyed" \
