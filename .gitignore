@@ -1,7 +1,5 @@
 .venv/
 
-RESTART.md
-
 external_projects/
 
 #cloudimg/*
