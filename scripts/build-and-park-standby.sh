@@ -13,8 +13,11 @@
 #      base toolchain, shared with k8s-cluster.yaml Play 1) against them,
 #      restricted to exactly the running ghosts. This builds a standby VM
 #      "like any other node".
-#   3. Parks all standby VMs (clean shutdown + standby tag) via
-#      reconcile-standby-nodes.sh --park.
+#   3. Parks the built ghosts with a clean shutdown over SSH — sudo poweroff
+#      on the ansible account (passwordless sudo), which is deterministic
+#      because ansible just configured the host and proved it healthy. No
+#      Proxmox API status round-trip is needed for parking; the "standby" tag
+#      is already on the VM from Terraform.
 #
 # No-op when no standby VMs exist or none are running. The "standby" tag is
 # the source of truth for membership (Terraform stamps it at creation, the
@@ -113,7 +116,12 @@ if [ "$STATUS" -ne 0 ]; then
   exit "$STATUS"
 fi
 
-echo "=== Parking standby VMs ==="
-sh scripts/reconcile-standby-nodes.sh --park
+echo "=== Parking standby VMs (SSH poweroff) ==="
+for name in $(echo "$RUNNING_NAMES" | tr ',' ' '); do
+  echo "  powering off $name"
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 \
+    -i /tmp/ansible_key "ansible@${name}.${DNS_DOMAIN}" "sudo systemctl poweroff" \
+    || echo "  WARNING: poweroff failed for $name"
+done
 
 echo "=== Standby build and park complete ==="
