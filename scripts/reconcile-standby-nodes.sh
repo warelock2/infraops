@@ -13,8 +13,9 @@
 #           before Ansible tries to reach it; also heals a manually-stopped
 #           active node)
 #   --park  ensure every STANDBY VM is stopped and carries the "standby" tag,
-#           and clear the tag from any active VM (called after the ghost
-#           build step)
+#           and clear the tag from any active VM. Ad-hoc enforcement utility:
+#           the CI build-and-park step parks freshly-built ghosts directly via
+#           SSH sudo poweroff, and calls this only to tidy tags if needed.
 #
 # Both modes are idempotent and only touch VMs that exist. Tags other than
 # "standby" (e.g. "iac") are always preserved.
@@ -92,9 +93,11 @@ vm_exists() {
 }
 
 vm_running() {
+  # /status returns the subdirectory LIST (current/start/stop/...) — use
+  # /status/current, which carries the actual runtime status in .data.status.
   curl -k -sS -f \
     -H "Authorization: PVEAPIToken=$PROXMOX_TOKEN" \
-    "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${1}/status" \
+    "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${1}/status/current" \
     | jq -e '.data.status == "running"' >/dev/null 2>&1
 }
 
