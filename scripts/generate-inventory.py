@@ -8,6 +8,7 @@ Terraform output-based inventory generation.
 
 Usage:
     python scripts/generate-inventory.py [--output ansible/inventory.json]
+    python scripts/generate-inventory.py --standby --output ansible/inventory-standby.json
 """
 
 import json
@@ -134,6 +135,56 @@ def generate_inventory(infra: dict, dns_domain: str) -> dict:
     return inventory
 
 
+def generate_standby_inventory(infra: dict, dns_domain: str) -> dict:
+    """Generate a standby-only inventory for the ghost build step.
+
+    Standby VMs are parked spare nodes (plane.standby), packed at the tail of
+    each plane (nodes+1 .. nodes+standby). They are NEVER part of the normal
+    inventory (they'd be unreachable while parked). This separate inventory is
+    generated on demand when a standby VM has just been created and needs to be
+    built to "ready to join" state before being parked.
+
+    Groups: k8s_standby (targeted by k8s-standby-build.yaml) and
+    configuration_management (so the common baseline play applies to them).
+    """
+    inventory = {
+        "all": {"hosts": {}},
+        "configuration_management": {"hosts": {}},
+        "k8s_standby": {"hosts": {}},
+    }
+
+    clusters = infra.get("clusters", [])
+    for cluster in clusters:
+        cluster_name = cluster["name"]
+        cluster_type = cluster.get("cluster_type", infra.get("defaults", {}).get("cluster_type", "k8s"))
+        enforcement = cluster.get("enforcement", [])
+
+        if "infrastructure_provisioning" not in enforcement:
+            continue
+
+        planes = {
+            "control_plane": infra.get("defaults", {}).get("planes", {}).get("control_plane", {}).get("plane_name", "control"),
+            "workers": infra.get("defaults", {}).get("planes", {}).get("workers", {}).get("plane_name", "worker"),
+        }
+
+        for plane_key, plane_name in planes.items():
+            plane = cluster.get(plane_key, {})
+            nodes = plane.get("nodes", 0)
+            standby = plane.get("standby", 0)
+            if standby == 0:
+                continue
+            for i in range(nodes + 1, nodes + standby + 1):
+                name = build_vm_name(cluster_type, cluster_name, plane_name, i)
+                host_vars = {"ansible_host": f"{name}.{dns_domain}"}
+                inventory["all"]["hosts"][name] = host_vars
+                inventory["configuration_management"]["hosts"][name] = {
+                    "post_patch_reboot": cluster.get("post_patch_reboot", True)
+                }
+                inventory["k8s_standby"]["hosts"][name] = {}
+
+    return inventory
+
+
 def main():
     """Main entry point."""
     import argparse
@@ -149,6 +200,11 @@ def main():
         default=None,
         help="Output file path (default: stdout)",
     )
+    parser.add_argument(
+        "--standby",
+        action="store_true",
+        help="Generate a standby-only inventory (k8s_standby + configuration_management groups) for building parked spare nodes",
+    )
     args = parser.parse_args()
 
     # Load infrastructure
@@ -158,7 +214,10 @@ def main():
     dns_domain = infra.get("platform", {}).get("proxmox", {}).get("dns_domain", "localdomain")
 
     # Generate inventory
-    inventory = generate_inventory(infra, dns_domain)
+    if args.standby:
+        inventory = generate_standby_inventory(infra, dns_domain)
+    else:
+        inventory = generate_inventory(infra, dns_domain)
 
     # Output
     output = json.dumps(inventory, indent=2)

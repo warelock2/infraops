@@ -92,6 +92,11 @@ defaults:
 # ---------------------------------------------------------------------------
 # clusters — the k8s clusters Terraform provisions. VM names derive as
 # <cluster_type>-<name>-<plane>-<NN>; vm_id_start/end bound the VM ID range.
+# `standby` pre-provisions parked spare VMs (packed at the tail of each plane,
+# nodes+1 .. nodes+standby): they are built to "ready to join" state then
+# powered off. Increasing `nodes` by k and decreasing `standby` by k promotes
+# a ghost (boot + join) without rebuilding — keep the total constant for a
+# no-op Terraform apply.
 # ---------------------------------------------------------------------------
 clusters:
   - name: mycluster
@@ -100,11 +105,13 @@ clusters:
       - configuration_management
     control_plane:
       nodes: 1
+      standby: 0
       vm_id_start: 9000
       vm_id_end: 9049
       vip: "10.0.0.100"
     workers:
       nodes: 2
+      standby: 0
       vm_id_start: 9050
       vm_id_end: 9099
 

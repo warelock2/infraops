@@ -18,9 +18,19 @@
 #      resolves only to in-pool IPs, and when a boot-window ghost lease left
 #      a stale registration, delete the ghost lease FIRST then restart pfSense
 #      DHCP so Unbound is rebuilt clean — Ansible never sees polluted DNS.
-#   6. Generate the Ansible inventory and run site.yaml (k8s-cluster plays).
+#   6. Wake active nodes (reconcile-standby-nodes.sh --wake): a PROMOTION
+#      run changes only the active/standby split (nodes +k, standby -k, total
+#      flat), which Terraform sees as no diff — yet the promoted ghost must
+#      be booted before Ansible touches it. This starts every stopped active
+#      VM and clears the "standby" tag from actives.
+#   7. Generate the Ansible inventory and run site.yaml (k8s-cluster plays).
 #      Ansible stamps "iac" on the hosts its recap reports as changed.
-#   7. LAST STEP, Clear IaC Tags: removes "iac" from the UNION of the
+#   8. Build and park standby nodes (build-and-park-standby.sh): running
+#      ghosts are built like any other node (common baseline + k8s base
+#      toolchain) then parked — clean shutdown + standby tag. Standby VMs are
+#      deliberately iac-invisible: Terraform never stamps them and this step
+#      emits no drift.
+#   9. LAST STEP, Clear IaC Tags: removes "iac" from the UNION of the
 #      Terraform-drifted and Ansible-drifted host sets only — any other
 #      tagged host is left alone. No if: gate: fail-fast means reaching it
 #      implies the whole run succeeded.
@@ -53,13 +63,16 @@ jobs:
             sh -c "git clone --depth 1 --branch master
             https://docker.localdomain:3000/warelock/infraops.git
             /tmp/repo && cp -r /tmp/repo/.
-            /workspace/warelock/infraops/"
+            /workspace/warelock/infraops/ &&
+            rm -f .iac-timings.log &&
+            sh scripts/record-timing.sh checkout"
 
       - name: Validate Infrastructure YAML
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c "check-jsonschema --schemafile conf/infrastructure.schema.yaml
+            sh -c "sh scripts/record-timing.sh validate &&
+            check-jsonschema --schemafile conf/infrastructure.schema.yaml
             conf/infrastructure.yaml"
 
       - name: Generate Diagram
@@ -95,7 +108,8 @@ jobs:
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c "sh scripts/terraform-init-retry.sh -chdir=terraform init && set +e;
+            sh -c "sh scripts/record-timing.sh plan &&
+            sh scripts/terraform-init-retry.sh -chdir=terraform init && set +e;
             terraform -chdir=terraform plan -detailed-exitcode -no-color -input=false > /tmp/plan_output.txt 2>&1;
             PLAN_EXIT=\$?;
             set -e;
@@ -189,7 +203,9 @@ jobs:
         if: github.ref == 'refs/heads/master'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: sh scripts/terraform-apply-with-readiness.sh
+          args: >
+            sh -c "sh scripts/record-timing.sh apply &&
+            sh scripts/terraform-apply-with-readiness.sh"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
@@ -213,7 +229,27 @@ jobs:
         if: github.ref == 'refs/heads/master' && steps.apply-wait.outputs.ready == 'true' && steps.changes.outputs.changed == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: sh scripts/restart-pfsense-dhcp.sh
+          args: >
+            sh -c "sh scripts/record-timing.sh dns-clean &&
+            sh scripts/restart-pfsense-dhcp.sh"
+        env:
+          VAULT_ADDR: https://vault.afobl.com
+          VAULT_SKIP_VERIFY: "true"
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+
+      # ---------------------------------------------------------------------
+      # Enforce the active/standby partition before config management. On a
+      # PROMOTION run (nodes +k, standby -k — total flat) Terraform sees no
+      # diff, yet the promoted ghost must be booted before Ansible tries to
+      # reach it. This step starts every active VM that is currently stopped
+      # and clears the "standby" tag from actives (heals manually-stopped
+      # nodes too). No-op when nothing needs starting.
+      # ---------------------------------------------------------------------
+      - name: Wake Active Nodes (reconcile standby)
+        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true' && steps.apply-wait.outputs.ready == 'true'
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
+        with:
+          args: sh scripts/reconcile-standby-nodes.sh --wake
         env:
           VAULT_ADDR: https://vault.afobl.com
           VAULT_SKIP_VERIFY: "true"
@@ -239,7 +275,29 @@ jobs:
         if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_config_management == 'true' && steps.apply-wait.outputs.ready == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: sh scripts/configuration-management.sh
+          args: >
+            sh -c "sh scripts/record-timing.sh config-mgmt &&
+            sh scripts/configuration-management.sh"
+        env:
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+          ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+
+      # ---------------------------------------------------------------------
+      # Build and park standby VMs. Runs AFTER config management (normal nodes
+      # are done first). Only freshly-created standby VMs are running; parked
+      # ones are stopped and skipped. Running ghosts are built like any other
+      # node (common baseline + k8s base toolchain) then parked via
+      # reconcile-standby-nodes.sh --park (clean shutdown + standby tag).
+      # No-op when no standby VMs exist or none are running.
+      # ---------------------------------------------------------------------
+      - name: Build and Park Standby Nodes
+        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true' && steps.apply-wait.outputs.ready == 'true'
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
+        with:
+          args: >
+            sh -c "sh scripts/record-timing.sh build-park &&
+            sh scripts/build-and-park-standby.sh"
         env:
           ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
           ADMIN_SSH_PUBLIC_KEY: ${{ secrets.ADMIN_SSH_PUBLIC_KEY }}
@@ -263,10 +321,17 @@ jobs:
       - name: Clear IaC Tags
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
-          args: sh scripts/clear-iac-tags.sh
+          args: >
+            sh -c "sh scripts/record-timing.sh clear-tags &&
+            sh scripts/clear-iac-tags.sh"
         env:
           TERRAFORM_DRIFTED: ${{ steps.apply-wait.outputs.terraform_drifted }}
           ANSIBLE_DRIFTED: ${{ steps.config-mgmt.outputs.ansible_drifted }}
           VAULT_ADDR: https://vault.afobl.com
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+
+      - name: Report Timings
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
+        with:
+          args: sh scripts/report-timings.sh
