@@ -41,7 +41,7 @@ def cluster_node_ids(infra: dict) -> set:
         for plane_key in ("control_plane", "workers"):
             plane = cluster.get(plane_key, {})
             start = plane.get("vm_id_start")
-            count = plane.get("nodes", 0)
+            count = plane.get("nodes", 0) + plane.get("standby", 0)
             if start is not None:
                 ids.update(range(start, start + count))
     return ids

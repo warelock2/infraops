@@ -44,17 +44,19 @@ for i in $(seq 0 $((CLUSTER_COUNT - 1))); do
   CLUSTER_TYPE=$(yq ".clusters[$i].cluster_type // .defaults.cluster_type" conf/infrastructure.yaml)
   CP_NODES=$(yq ".clusters[$i].control_plane.nodes // 0" conf/infrastructure.yaml)
   WORKER_NODES=$(yq ".clusters[$i].workers.nodes // 0" conf/infrastructure.yaml)
+  CP_STANDBY=$(yq ".clusters[$i].control_plane.standby // 0" conf/infrastructure.yaml)
+  WORKER_STANDBY=$(yq ".clusters[$i].workers.standby // 0" conf/infrastructure.yaml)
   CP_PLANE_NAME=$(yq ".clusters[$i].plane_defaults.control_plane.plane_name // .defaults.planes.control_plane.plane_name" conf/infrastructure.yaml)
   WORKER_PLANE_NAME=$(yq ".clusters[$i].plane_defaults.workers.plane_name // .defaults.planes.workers.plane_name" conf/infrastructure.yaml)
   CP_VM_ID_START=$(yq ".clusters[$i].control_plane.vm_id_start" conf/infrastructure.yaml)
   WORKER_VM_ID_START=$(yq ".clusters[$i].workers.vm_id_start" conf/infrastructure.yaml)
-  for n in $(seq 1 $CP_NODES); do
+  for n in $(seq 1 $((CP_NODES + CP_STANDBY))); do
     NUM=$(printf "%02d" $n)
     HOSTNAME="${CLUSTER_TYPE}-${CLUSTER_NAME}-${CP_PLANE_NAME}-${NUM}"
     VMID=$((CP_VM_ID_START + n - 1))
     EXPECTED_VMS="${EXPECTED_VMS}${HOSTNAME}:${VMID} "
   done
-  for n in $(seq 1 $WORKER_NODES); do
+  for n in $(seq 1 $((WORKER_NODES + WORKER_STANDBY))); do
     NUM=$(printf "%02d" $n)
     HOSTNAME="${CLUSTER_TYPE}-${CLUSTER_NAME}-${WORKER_PLANE_NAME}-${NUM}"
     VMID=$((WORKER_VM_ID_START + n - 1))

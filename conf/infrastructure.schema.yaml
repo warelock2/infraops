@@ -393,7 +393,12 @@ properties:
               minimum: 1
               not:
                 multipleOf: 2
-              description: Number of control plane nodes (must be odd — e.g. 1, 3, or 5 — for quorum voting)
+              description: Number of ACTIVE control plane nodes (must be odd — e.g. 1, 3, or 5 — for quorum voting); standby nodes are parked VMs on top of this count
+            standby:
+              type: integer
+              minimum: 0
+              default: 0
+              description: Number of parked standby control plane VMs, packed at the tail of the plane (nodes+1 .. nodes+standby). Pre-built with the k8s base toolchain and powered off; activating one (increasing nodes) boots and joins it for fast expansion
             vip:
               type: string
               pattern: "^([0-9]{1,3}\\.){3}[0-9]{1,3}$"
@@ -435,7 +440,12 @@ properties:
             nodes:
               type: integer
               minimum: 1
-              description: Number of worker nodes
+              description: Number of ACTIVE worker nodes; standby nodes are parked VMs on top of this count
+            standby:
+              type: integer
+              minimum: 0
+              default: 0
+              description: Number of parked standby worker VMs, packed at the tail of the plane (nodes+1 .. nodes+standby). Pre-built with the k8s base toolchain and powered off; activating one (increasing nodes) boots and joins it for fast expansion
             vm_id_start:
               type: integer
               minimum: 100

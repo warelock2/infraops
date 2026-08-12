@@ -116,7 +116,8 @@ Type: `array`
 | `clusters[].plane_defaults.workers.cores (4)` | integer | — | `min: 1` | Worker CPU override |
 | `clusters[].plane_defaults.workers.disk_gb (4)` | integer | — | `min: 1` | Worker disk override |
 | `clusters[].control_plane (2)` | object | — | — | Control plane node configuration |
-| `clusters[].control_plane.nodes (3)` | integer | — | `min: 1; not multiple of: 2` | Number of control plane nodes (must be odd — e.g. 1, 3, or 5 — for quorum voting) |
+| `clusters[].control_plane.nodes (3)` | integer | — | `min: 1; not multiple of: 2` | Number of ACTIVE control plane nodes (must be odd — e.g. 1, 3, or 5 — for quorum voting); standby nodes are parked VMs on top of this count |
+| `clusters[].control_plane.standby (3)` | integer | `0` | `min: 0` | Number of parked standby control plane VMs, packed at the tail of the plane (nodes+1 .. nodes+standby). Pre-built with the k8s base toolchain and powered off; activating one (increasing nodes) boots and joins it for fast expansion |
 | `clusters[].control_plane.vip (3)` | string | — | `pattern: ^([0-9]{1,3}\.){3}[0-9]{1,3}$` | Virtual IP for k8s API endpoint (keepalived) |
 | `clusters[].control_plane.vm_id_start (3)` | integer | — | `min: 100` | Start of VM ID range for control plane |
 | `clusters[].control_plane.vm_id_end (3)` | integer | — | `min: 100` | End of VM ID range for control plane |
@@ -126,7 +127,8 @@ Type: `array`
 | `clusters[].control_plane.disk_gb (3)` | integer | — | `min: 1` | Control plane disk override |
 | `clusters[].control_plane.datastore (3)` | string | — | — | Control plane datastore override |
 | `clusters[].workers (2)` | object | — | — | Worker node configuration |
-| `clusters[].workers.nodes (3)` | integer | — | `min: 1` | Number of worker nodes |
+| `clusters[].workers.nodes (3)` | integer | — | `min: 1` | Number of ACTIVE worker nodes; standby nodes are parked VMs on top of this count |
+| `clusters[].workers.standby (3)` | integer | `0` | `min: 0` | Number of parked standby worker VMs, packed at the tail of the plane (nodes+1 .. nodes+standby). Pre-built with the k8s base toolchain and powered off; activating one (increasing nodes) boots and joins it for fast expansion |
 | `clusters[].workers.vm_id_start (3)` | integer | — | `min: 100` | Start of VM ID range for workers |
 | `clusters[].workers.vm_id_end (3)` | integer | — | `min: 100` | End of VM ID range for workers |
 | `clusters[].workers.drawio_icon (3)` | string | `mxgraph.kubernetes.node` | — | Draw.io icon for worker nodes |

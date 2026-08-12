@@ -170,6 +170,8 @@ The `iac` tag is a **state-drift tag**: it marks a host as "IaC detected state d
 - **Terraform** (`scripts/terraform-apply-with-readiness.sh` → `scripts/stamp-iac-tags.sh`) stamps every VM the plan changes — `create`, `replace` (`delete,create`), or in-place `update` (e.g. a RAM adjust). This includes a VM that was destroyed out-of-band and is restored as state drift: the plan reports it as `create`, so it is stamped and later cleared like any other drifted VM. Pure no-ops and pure destroys are excluded.
 - **Ansible** (`scripts/configuration-management.sh` → `scripts/stamp-iac-tags.sh`) stamps every inventory host whose play recap reports `changed > 0` — Ansible's own signal that its tasks modified the host's state.
 
+Standby (parked spare) VMs are deliberately **iac-exempt**: Terraform creates them with only the `standby` tag (never `iac`), and `extract_drifted_vms` filters anything tagged `standby` out of the drift set. The standby build step also emits no Ansible drift. They are pre-provisioned capacity, not state drift — a failed run never leaves a "please investigate" marker on them.
+
 `stamp-iac-tags.sh` is idempotent and preserves any other tags on the host.
 
 ### Who clears it
@@ -180,6 +182,31 @@ This scoping is deliberate:
 
 - A host tagged by an **earlier failed run** but **not touched this run** keeps its tag — it was not acted on, so its drift signal stays visible for investigation.
 - Terraform checks every `infrastructure_provisioning` host for drift and Ansible checks every `configuration_management` host, but typically only a **subset** drifts in any given run. The tag and its clearing track that actual subset, not the whole managed fleet.
+
+## Standby Node Pools
+
+Standby nodes are **pre-provisioned, parked spare VMs** that let a cluster expand without paying the full cold-build cost. The economics: a new VM costs ~20 min (clone, cloud-init double-boot, baseline, k8s base toolchain, join, RBAC); a **promoted ghost** costs ~5–8 min (boot + join + RBAC). Only the join's irreducible floor is unpaid — everything clone-ward is pre-paid while the cluster is idle.
+
+### Model
+
+- The SSOT's per-plane `standby` integer (default `0`) declares parked spares packed at the tail of the plane: `nodes + 1 .. nodes + standby`. `nodes` is the **active** count.
+- **Terraform knows only the total** (`nodes + standby`). It provisions uniform VMs, reserves IPs/DNS, and tags ghosts `standby` (active VMs get `iac`). It never models power state — a ghost is created running, like any VM.
+- **Ansible + the Proxmox API enforce the partition.** `scripts/reconcile-standby-nodes.sh --park` cleanly shuts a ghost down (qemu-guest-agent / ACPI — never suspend: a suspended VM wakes with a frozen clock and stale RAM, wrong at the moment the k8s join runs) and maintains the `standby` tag; `--wake` boots active VMs and clears the tag.
+- `scripts/build-and-park-standby.sh` builds a freshly-created ghost "like any other node" (common baseline + the k8s base toolchain from `tasks/k8s-base.yaml`, shared with `k8s-cluster.yaml` Play 1) then parks it. It targets whatever is running *and* tagged `standby`, so it self-heals ghosts left running by an interrupted earlier run; already-parked ghosts are skipped (no-op).
+
+### Lifecycle (three commits)
+
+1. **Create** the cluster with `standby: 0` — identical to today.
+2. **Add standby**: bump `standby: N` → the next run creates, boots, builds, and parks the ghosts. Cluster untouched.
+3. **Promote** (fast): `nodes +k`, `standby −k` — total flat, so Terraform sees no diff and apply is a no-op. The workflow's *Wake Active Nodes* step boots the promoted ghost, config management joins it, and the remaining ghosts stay parked. Replenish later by bumping `standby` again in a separate, cluster-neutral run.
+
+**Scale-down**: reduce `standby` in the same edit that reduces `nodes` (total shrinks) so the drained boundary node is destroyed rather than re-parked.
+
+### Guardrails
+
+- **iac-invisible**: ghosts are pre-provisioned capacity, not drift — no `iac` tag at creation, excluded from `extract_drifted_vms`, and the build step emits no Ansible drift. A failed run never flags a ghost for investigation.
+- **Readiness gate**: standby VMs are created through the normal Terraform flow and signal readiness over NATS like any new VM, so the gate waits for their cloud-init to finish before anything configures them.
+- **Version drift while parked**: solved by converge-on-promotion — the k8s base tasks are idempotent, so promotion re-pins whatever version the SSOT demands at boot time.
 
 ## CI/CD Pipeline
 
@@ -200,9 +227,11 @@ flowchart TD
     FIX_PERMS --> CONSUMER["Ensure Readiness Poller Consumer Exists"]
     CONSUMER --> APPLY["Apply and Wait for Readiness<br/>NATS gate + failed-VM retries<br/>stamp iac tag on drifted VMs"]
     APPLY --> DHCP["Restart pfSense DHCP<br/>auto-delete ghost leases"]
-    DHCP --> GEN_INV["Generate Ansible Inventory"]
+    DHCP --> WAKE["Wake Active Nodes<br/>reconcile-standby-nodes.sh --wake"]
+    WAKE --> GEN_INV["Generate Ansible Inventory"]
     GEN_INV --> CONFIG_MGMT["Configuration Management<br/>ansible-playbook site.yaml<br/>stamp iac tag on changed hosts"]
-    CONFIG_MGMT --> CLEAR["Clear IaC Tags<br/>remove iac from drifted set only"]
+    CONFIG_MGMT --> BUILD_PARK["Build and Park Standby Nodes<br/>build-and-park-standby.sh"]
+    BUILD_PARK --> CLEAR["Clear IaC Tags<br/>remove iac from drifted set only"]
     CLEAR --> DONE([Complete])
 ```
 

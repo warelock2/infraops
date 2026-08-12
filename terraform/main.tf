@@ -122,7 +122,7 @@ locals {
   node_list = flatten([
     for c in local.managed_clusters : flatten([
       for plane in ["control_plane", "workers"] : [
-        for n in range(try(c[plane].nodes, 0)) : {
+        for n in range(try(c[plane].nodes, 0) + try(c[plane].standby, 0)) : {
           name = format(
             "%s-%s-%s-%02d",
             try(c.cluster_type, local.infra.defaults.cluster_type),
@@ -135,6 +135,7 @@ locals {
           memory_gb = try(c[plane].memory_gb, try(c.plane_defaults[plane].memory_gb, local.infra.defaults.node_vm.memory_gb))
           disk_gb   = try(c[plane].disk_gb, try(c.plane_defaults[plane].disk_gb, local.infra.defaults.node_vm.disk_gb))
           datastore = try(c[plane].datastore, local.infra.defaults.node_vm.datastore)
+          standby   = n >= try(c[plane].nodes, 0)
         }
       ]
     ])
@@ -149,6 +150,7 @@ locals {
     memory    = n.memory_gb * 1024
     disk      = n.disk_gb
     datastore = n.datastore
+    standby   = n.standby
   } }
 
   # Standalone hosts (non-cluster, e.g. docker, firewall) keyed by name.
@@ -229,7 +231,7 @@ locals {
         plane   = plane
         message = "VM IDs exceed vm_id_end range for ${plane} in cluster ${c.name}"
       }
-      if try(c[plane].vm_id_end, null) != null && try(c[plane].vm_id_start, 0) + try(c[plane].nodes, 0) - 1 > c[plane].vm_id_end
+      if try(c[plane].vm_id_end, null) != null && try(c[plane].vm_id_start, 0) + try(c[plane].nodes, 0) + try(c[plane].standby, 0) - 1 > c[plane].vm_id_end
     ]
   ])
 
@@ -312,8 +314,11 @@ resource "proxmox_virtual_environment_vm" "vm" {
   # The "iac" tag marks the VM as affected by the current IaC run. It is applied
   # at creation and cleared by scripts/clear-iac-tags.sh once the workflow has
   # fully succeeded; a failed run leaves the tag so the affected VMs are visible
-  # in Proxmox. tags is in ignore_changes so Terraform never fights the clear.
-  tags = ["iac"]
+  # in Proxmox. Standby (parked) VMs deliberately carry NO iac tag — they are
+  # pre-provisioned capacity, not drift — instead they get a "standby" tag that
+  # the reconcile script maintains. tags is in ignore_changes so Terraform never
+  # fights the clear.
+  tags = each.value.standby ? ["standby"] : ["iac"]
 
   lifecycle {
     precondition {

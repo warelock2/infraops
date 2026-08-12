@@ -35,6 +35,9 @@ extract_created_vms() {
 # "iac" stamp after apply. Pure no-ops and pure destroys are excluded (a
 # destroyed VM no longer exists, so there is nothing to tag).
 #
+# Standby VMs (tagged "standby") are excluded too: they are pre-provisioned
+# capacity, not drift, so they must never carry the iac marker.
+#
 # Output: one "hostname:vmid" pair per line.
 # ---------------------------------------------------------------------------
 extract_drifted_vms() {
@@ -42,6 +45,7 @@ extract_drifted_vms() {
     [.resource_changes[]
      | select(.type == "proxmox_virtual_environment_vm")
      | select((.change.actions | index("create")) or (.change.actions | index("update")))
+     | select((((.change.after.tags // .change.before.tags) // []) | index("standby")) | not)
      | [((.index // .name)), ((.change.after.vm_id // .change.before.vm_id) | tostring)]
      | join(":")] | .[]'
 }

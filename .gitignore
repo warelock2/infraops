@@ -46,6 +46,10 @@ id_rsa*
 
 # Ansible (generated)
 ansible/inventory.json
+ansible/inventory-standby.json
+
+# CI run timing log (written by scripts/record-timing.sh)
+.iac-timings.log
 
 setpw.sh
 certs/
