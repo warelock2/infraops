@@ -75,6 +75,7 @@ GIT_COMMIT="${GITHUB_SHA::8}"
 GIT_TAG="${GITHUB_REF_NAME}"
 
 ANSIBLE_LOG=/tmp/ansible-output.log
+: > "$ANSIBLE_LOG"
 ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml \
   --private-key /tmp/ansible_key \
   -e infra_platform_kubernetes_version=$(yq .tools.kubernetes conf/infrastructure.yaml) \
@@ -86,10 +87,45 @@ ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml \
   -e infra_ssh_key_file=/tmp/ssh_key.pub \
   -e git_commit=$GIT_COMMIT \
   -e git_tag=$GIT_TAG \
-  -e ntfy_message_channel=$NTFY_CHANNEL >"$ANSIBLE_LOG" 2>&1
-ANSIBLE_STATUS=$?
-cat "$ANSIBLE_LOG"
+  -e ntfy_message_channel=$NTFY_CHANNEL >"$ANSIBLE_LOG" 2>&1 &
+ANSIBLE_PID=$!
+RUN_START=$(date +%s)
+LAST_HEARTBEAT=$RUN_START
+LAST_LINE=0
+while kill -0 "$ANSIBLE_PID" 2>/dev/null; do
+  tail -n "+$((LAST_LINE + 1))" "$ANSIBLE_LOG" 2>/dev/null
+  LAST_LINE=$(wc -l < "$ANSIBLE_LOG" 2>/dev/null || echo "$LAST_LINE")
+  NOW=$(date +%s)
+  if [ $((NOW - LAST_HEARTBEAT)) -ge 60 ]; then
+    echo "[watchdog] ansible site playbook still running (elapsed $((NOW - RUN_START))s) - last task above"
+    LAST_HEARTBEAT=$NOW
+  fi
+  sleep 3
+done
+if wait "$ANSIBLE_PID"; then
+  ANSIBLE_STATUS=0
+else
+  ANSIBLE_STATUS=$?
+fi
+tail -n "+$((LAST_LINE + 1))" "$ANSIBLE_LOG" 2>/dev/null
 if [ "$ANSIBLE_STATUS" -ne 0 ]; then
+  echo "=== ANSIBLE FAILURE DIAGNOSTICS (exit $ANSIBLE_STATUS) ==="
+  echo "--- PLAY RECAP ---"
+  awk '/PLAY RECAP/{recap=1} recap' "$ANSIBLE_LOG" || true
+  echo "--- failures / unreachable ---"
+  grep -nE 'fatal:|FAILED!|unreachable=|ERROR' "$ANSIBLE_LOG" || true
+  echo "--- last 40 lines of ansible output ---"
+  tail -n 40 "$ANSIBLE_LOG" || true
+  if [ -s ~/.kube/config ]; then
+    echo "--- cluster state (nodes) ---"
+    kubectl --kubeconfig ~/.kube/config get nodes -o wide 2>&1 || true
+    echo "--- cluster state (pods) ---"
+    kubectl --kubeconfig ~/.kube/config get pods -A -o wide 2>&1 | head -50 || true
+    echo "--- recent cluster events ---"
+    kubectl --kubeconfig ~/.kube/config get events -A --sort-by=.lastTimestamp 2>&1 | tail -30 || true
+  else
+    echo "--- no kubeconfig available (cluster likely not bootstrapped) ---"
+  fi
   echo "ERROR: ansible site playbook failed (exit $ANSIBLE_STATUS)" >&2
   exit "$ANSIBLE_STATUS"
 fi
