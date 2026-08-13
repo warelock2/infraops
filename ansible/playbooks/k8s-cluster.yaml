@@ -278,7 +278,7 @@
       # apiserver manifests referencing files no node has. Align the extraArgs
       # list with the flags this template renders, so joins see current config.
       ansible.builtin.script:
-        scripts/reconcile-kubeadm-config.py --kubeconfig /etc/kubernetes/admin.conf oidc-issuer-url={{ oidc_issuer_url }} oidc-client-id={{ oidc_client_id }} oidc-username-claim=preferred_username oidc-groups-claim=groups
+        "{{ playbook_dir }}/../../scripts/reconcile-kubeadm-config.py --kubeconfig /etc/kubernetes/admin.conf oidc-issuer-url={{ oidc_issuer_url }} oidc-client-id={{ oidc_client_id }} oidc-username-claim=preferred_username oidc-groups-claim=groups"
       register: kubeadm_config_reconcile
       changed_when: "'updated' in kubeadm_config_reconcile.stdout"
       when: inventory_hostname == cp_leader
