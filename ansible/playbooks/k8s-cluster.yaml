@@ -215,6 +215,13 @@
 # control node tries to join. cp_leader = the first (alphabetically) control
 # node; it runs "kubeadm init --upload-certs", everyone else joins.
 #
+# After init the leader reconciles the kubeadm-config ConfigMap's
+# apiServer.extraArgs against the flags the IaC template renders, so stale
+# flags (e.g. a dropped oidc-ca-file pin) can never leak into the manifests a
+# promoted standby node generates when it joins. Joining control nodes then
+# wait for their LOCAL apiserver (:6444) to become healthy, failing fast with
+# logs instead of letting Play 6's node-ready wait time out silently.
+#
 # Facts shared between hosts: set_fact on the leader is readable by workers
 # via hostvars[cp_leader]. The admin kubeconfig, join token, certificate key
 # and Calico manifest are all produced here and consumed in Play 5.
@@ -263,6 +270,19 @@
         - inventory_hostname == cp_leader
         - not k8s_admin_conf.stat.exists
 
+    - name: Reconcile kubeadm-config apiServer.extraArgs against IaC template
+      # kubeadm writes the kubeadm-config ConfigMap once at init and never
+      # rewrites it; new control-plane nodes join against whatever is in it.
+      # If the template changes later (e.g. a stale oidc-ca-file pin was
+      # dropped), the ConfigMap keeps the old flags and ghost joins generate
+      # apiserver manifests referencing files no node has. Align the extraArgs
+      # list with the flags this template renders, so joins see current config.
+      ansible.builtin.script:
+        scripts/reconcile-kubeadm-config.py --kubeconfig /etc/kubernetes/admin.conf oidc-issuer-url={{ oidc_issuer_url }} oidc-client-id={{ oidc_client_id }} oidc-username-claim=preferred_username oidc-groups-claim=groups
+      register: kubeadm_config_reconcile
+      changed_when: "'updated' in kubeadm_config_reconcile.stdout"
+      when: inventory_hostname == cp_leader
+
     - name: kubeadm join (additional control plane node)
       ansible.builtin.command:
         cmd: "{{ hostvars[cp_leader]['k8s_cp_join_command'] }}"
@@ -270,6 +290,42 @@
       when:
         - inventory_hostname != cp_leader
         - not k8s_admin_conf.stat.exists
+
+    - name: Wait for local API server on additional control nodes
+      # A control-plane join writes the static apiserver manifest and the
+      # kubelet starts it immediately; the play's later "wait for all nodes
+      # ready" (Play 6) would otherwise time out silently after 15 minutes on
+      # a crash-looping apiserver. Fail fast here, dumping the kubelet +
+      # apiserver container logs so the cause is obvious.
+      ansible.builtin.shell:
+        cmd: |
+          ready() {
+            kubectl --kubeconfig /etc/kubernetes/admin.conf \
+              --server https://{{ node_ip }}:6444 get --raw /readyz >/dev/null 2>&1
+          }
+          if ready; then
+            echo "local API server healthy"
+            exit 0
+          fi
+          for i in $(seq 1 30); do
+            sleep 10
+            ready && { echo "local API server healthy"; exit 0; }
+          done
+          echo "ERROR: local API server not ready on {{ inventory_hostname }} (https://{{ node_ip }}:6444)" >&2
+          echo "--- kubelet (last 20) ---" >&2
+          journalctl -u kubelet --no-pager -n 20 2>/dev/null | tail -20 >&2
+          echo "--- kube-apiserver container (last 20) ---" >&2
+          if [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ]; then
+            CID=$(crictl ps -a 2>/dev/null | grep kube-apiserver | head -1 | awk '{print $1}')
+            if [ -n "$CID" ]; then
+              crictl logs "$CID" 2>&1 | tail -20 >&2
+            else
+              echo "(kube-apiserver static pod container not present)" >&2
+            fi
+          fi
+          exit 1
+      changed_when: false
+      when: inventory_hostname != cp_leader
 
     - name: Create .kube directory for ansible user
       ansible.builtin.file:
