@@ -264,7 +264,10 @@ resource "terraform_data" "dns_alloc" {
   # Force the provisioner to re-run on every apply. Without this, Terraform
   # only runs local-exec when the resource is first created — stale DNS
   # entries from a previous apply (e.g. DHCP ghosts) would never be corrected.
-  triggers_replace = [each.key, sha256(jsonencode(each.value))]
+  # The destroy provisioner cleans up DNS when a VM is removed from the SSOT.
+  # add-host.yaml is idempotent (skips if entry exists and is in-pool), so
+  # re-running every apply is safe and cheap.
+  triggers_replace = timestamp()
 
   input = {
     name = each.key
@@ -411,7 +414,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
 resource "terraform_data" "standalone_dns_alloc" {
   for_each = local.standalone_hosts_provision
 
-  triggers_replace = [each.key, sha256(jsonencode(each.value))]
+  triggers_replace = timestamp()
 
   input = {
     name = each.key
