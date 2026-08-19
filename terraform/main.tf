@@ -261,6 +261,11 @@ locals {
 resource "terraform_data" "dns_alloc" {
   for_each = local.vms
 
+  # Force the provisioner to re-run on every apply. Without this, Terraform
+  # only runs local-exec when the resource is first created — stale DNS
+  # entries from a previous apply (e.g. DHCP ghosts) would never be corrected.
+  triggers_replace = [each.key, sha256(jsonencode(each.value))]
+
   input = {
     name = each.key
   }
@@ -405,6 +410,8 @@ resource "proxmox_virtual_environment_vm" "vm" {
 # (docker, firewall, ...) rather than cluster nodes.
 resource "terraform_data" "standalone_dns_alloc" {
   for_each = local.standalone_hosts_provision
+
+  triggers_replace = [each.key, sha256(jsonencode(each.value))]
 
   input = {
     name = each.key
