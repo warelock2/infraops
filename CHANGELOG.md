@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-20
+
+### Added
+- **Standby node pools** — per-plane `standby` integer on clusters (default `0`). Terraform provisions `nodes + standby` uniform VMs; the partition is enforced by `scripts/reconcile-standby-nodes.sh` (wakes actives, clears the `standby` tag on promotion) and `scripts/build-and-park-standby.sh`: ghosts are pre-built with the k8s base toolchain (shared `tasks/k8s-base.yaml` used by both `k8s-cluster.yaml` Play 1 and the new `k8s-standby-build.yaml`) then parked with a clean `sudo poweroff` over SSH. Expanding the cluster (increase `nodes`, decrease `standby` — total flat) boots and joins the promoted ghost without rebuilding, ~3x faster than a cold build. Standby VMs are deliberately `iac`-invisible: Terraform stamps no `iac` tag on them and `extract_drifted_vms` filters them out. New CI steps: Wake Active Nodes (pre config-mgmt), Build and Park Standby Nodes (post config-mgmt), plus per-stage run timings via `scripts/record-timing.sh`/`report-timings.sh`
+- **Agent/skill framework** — 4 agents (`config-manager`, `k8s`, `provisioner`, `release-manager`) + 4 skills (`ssot-change`, `validate-infra`, `k8s-cluster`, `release`) with maintenance guide in AGENTS.md
+- **DNS ghost fix** — removed destroy provisioner from `dns_alloc`; added `replace_triggered_by` on VMs so config changes trigger full VM recreation with fresh cloud-init IPs instead of in-place updates
+- **Ghost control-plane join fix** — `scripts/reconcile-kubeadm-config.py` reconciles kubeadm-config ConfigMap `apiServer.extraArgs` on leader after init; joining control nodes fail-fast waiting for local apiserver
+- **Odd control-plane quorum rule** — `clusters[].control_plane.nodes` must be odd (e.g. 1, 3, or 5) so etcd voting can't deadlock; even counts fail schema validation. Doc generator renders `not:` constraints into `SCHEMA_REFERENCE.md`
+
+### Changed
+- Schema: added `standby` fields to `control_plane` and `workers` planes with defaults
+- pfSense DNS creation: use `pfrest.pfsense` collection module (raw POST returned 405)
+- Stream ansible output live with forensics dump on config-mgmt failure
+
+### Fixed
+- DNS IP shuffle on `dns_alloc` recreate: destroy provisioner deleted entries before create re-allocated in random order
+- pfSense API 405 on host override creation (plural endpoint doesn't support POST)
+- `add-host.yaml` now cleans up ghost entries (IP outside pool) and preserves valid in-pool entries
+
 ## [Unreleased]
 
 ### Added
