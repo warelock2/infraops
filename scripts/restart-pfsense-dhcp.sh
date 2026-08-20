@@ -212,10 +212,34 @@ echo "apply HTTP $HTTP_CODE"
 }
 
 echo "=== Waiting for DHCP/DNS to settle ==="
-sleep 5
+sleep 15
 
 echo "=== Re-verifying DNS after ghost lease deletion ==="
-if verify_dns; then
+# Increased retries and wait time for DNS propagation
+GHOST_IPS=""
+GHOSTS=0
+for fqdn in $PROVISIONED_FQDNS; do
+  IP_LIST=""
+  for attempt in 1 2 3 4 5 6; do
+    IP_LIST=$(resolve_fqdn "$fqdn")
+    [ -n "$IP_LIST" ] && break
+    echo "  $fqdn not resolvable yet (attempt $attempt/6) — retrying"
+    sleep 5
+  done
+  [ -n "$IP_LIST" ] || { echo "ERROR: $fqdn does not resolve at all" >&2; GHOSTS=1; continue; }
+
+  for ip in $IP_LIST; do
+    if ip_in_pool "$ip"; then
+      echo "  OK: $fqdn -> $ip (in pool)"
+    else
+      echo "  GHOST: $fqdn -> $ip (outside pool)" >&2
+      GHOST_IPS="$GHOST_IPS $ip"
+      GHOSTS=1
+    fi
+  done
+done
+
+if [ "$GHOSTS" -eq 0 ]; then
   echo "=== DNS clean after deleting ghost lease(s): $GHOST_IPS ==="
   exit 0
 fi
