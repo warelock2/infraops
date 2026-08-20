@@ -144,13 +144,42 @@ For SSO access to a cluster instead of admin certs, run the Keycloak client setu
 
 Requires a Keycloak account in the `infraops` realm with membership in the cluster's `<cluster>-admins` or `<cluster>-viewers` group. Full workflow — user onboarding, first login, revoking access — is in [docs/k8s-keycloak-user-management-guide.md](docs/k8s-keycloak-user-management-guide.md).
 
-#### Deploy a Cluster
+#### Provision Infrastructure
 
-Trigger the `enforce-iac` workflow via Forgejo or:
+Any change to `conf/infrastructure.yaml` pushed to **master** triggers the `enforce-iac` CI workflow, which validates, plans, and applies all infrastructure (VMs, clusters, DNS, services).
+
+**Method 1: Safe editing with `viinfra` (recommended)**
 
 ```bash
-~/bin/trigger_workflow infraops enforce-iac.yaml
+./scripts/viinfra
+# Opens $EDITOR with a temp copy
+# On save: validates against schema → commits → pushes to origin
+# Prompts for commit message before pushing
 ```
+
+**Method 2: Manual edit + validate + git**
+
+```bash
+# Edit the SSOT
+vim conf/infrastructure.yaml
+
+# Validate locally (needs check-jsonschema)
+./scripts/validate-infra.sh
+
+# Commit and push to trigger CI
+git add conf/infrastructure.yaml
+git commit -m "feat: add banana cluster with 3 workers"
+git push origin master
+```
+
+**Manual CI trigger (without push)**
+
+- Forgejo UI: Actions → `enforce-iac.yaml` → "Run workflow"
+- API: `curl -X POST -H "Authorization: token $TOKEN" https://forgejo.example.com/api/v1/repos/warelock/infraops/actions/workflows/enforce-iac.yaml/dispatches -d '{"ref":"master"}'`
+
+**Skip CI**
+
+Add `[skip ci]` anywhere in the commit message to push without triggering the pipeline.
 
 ### Practical Usage
 
