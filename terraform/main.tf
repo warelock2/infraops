@@ -274,10 +274,11 @@ resource "terraform_data" "dns_alloc" {
     command = "ansible-playbook ${path.root}/../ansible/playbooks/manage-iac-dns.yaml -e 'workflow=add:${each.key}'"
   }
 
-  provisioner "local-exec" {
-    when    = destroy
-    command = "ansible-playbook ${path.root}/../ansible/playbooks/manage-iac-dns.yaml -e 'workflow=delete:${each.key}'"
-  }
+  # No destroy provisioner. When triggers_replace fires (VM config changed),
+  # Terraform destroys + recreates this resource. A destroy provisioner would
+  # DELETE the DNS entry before the create provisioner re-runs, causing
+  # non-deterministic IP re-allocation (DNS shuffle). Stale entries for removed
+  # VMs are handled by the ghost cleanup step in CI.
 }
 
 # ---------------------------------------------------------------------------
@@ -337,6 +338,12 @@ resource "proxmox_virtual_environment_vm" "vm" {
     }
 
     ignore_changes = [initialization, tags]
+
+    # When dns_alloc is replaced (VM config changed), recreate the VM so
+    # cloud-init picks up the fresh IP from dns-lookup.sh. Without this,
+    # Terraform treats memory/disk changes as in-place updates, leaving
+    # the VM running with a stale IP that no longer matches DNS.
+    replace_triggered_by = [terraform_data.dns_alloc[each.key]]
   }
 
   # QEMU guest agent gives Proxmox clean shutdown + guest info. wait_for_ip is
@@ -421,10 +428,7 @@ resource "terraform_data" "standalone_dns_alloc" {
     command = "ansible-playbook ${path.root}/../ansible/playbooks/manage-iac-dns.yaml -e 'workflow=add:${each.key}'"
   }
 
-  provisioner "local-exec" {
-    when    = destroy
-    command = "ansible-playbook ${path.root}/../ansible/playbooks/manage-iac-dns.yaml -e 'workflow=delete:${each.key}'"
-  }
+  # No destroy provisioner — same rationale as dns_alloc above.
 }
 
 # Standalone host DNS lookup
