@@ -226,7 +226,7 @@ jobs:
       # after deletion, so Ansible below never runs against polluted DNS.
       # ---------------------------------------------------------------------
       - name: Delete Ghost DHCP Leases and Restart pfSense DHCP
-        if: github.ref == 'refs/heads/master' && steps.apply-wait.outputs.ready == 'true' && steps.changes.outputs.changed == 'true'
+        if: github.ref == 'refs/heads/master' && steps.apply-wait.outputs.ready == 'true'
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
