@@ -1,127 +1,77 @@
 # ===========================================================================
 # Task file: add one DNS host override to the IAC pool on pfSense.
 #
-# Included from run-step.yaml in a loop, so `target_item` is set per iteration
-# (loop_var). IP resolution logic: use a caller-provided IP, otherwise
-# allocate the first free IP from the pool by rejecting already-used IPs.
+# IaC is declarative — we don't ask "what's there?" We delete whatever
+# exists, create what should be there, and verify it's correct. Every
+# host, every time. No conditionals on "does it already exist?".
 #
-# When an entry already exists, verify the IP is still valid:
-#   - If the IP is outside the pool range, it's a ghost → delete and
-#     re-allocate from the pool.
-#   - If the IP is in pool, it's either correct or a previously-shuffled
-#     allocation. Either way it's reachable → skip.
+# Included from run-step.yaml in a loop, so `target_item` is set per
+# iteration (loop_var).
 # ===========================================================================
 ---
-# Add a single DNS host override to the IAC pool.
 # Expects: target_item.hostname, target_item.domain
 # Optional: target_item.ip (if set, use this IP instead of allocating from pool)
-# Updates: used_ips (fact), pool_overrides (fact)
-
-- name: Add — check if target already exists in pool
-  ansible.builtin.set_fact:
-    existing: "{{ pool_overrides | selectattr('host', 'equalto', target_item.hostname) | selectattr('domain', 'equalto', target_item.domain) | list }}"
 
 # ---------------------------------------------------------------------------
-# Ghost cleanup: if the existing entry's IP is outside the pool range, it's a
-# stale ghost from a previous run. Delete it and let the allocation below
-# create a fresh in-pool entry. In-pool entries are always kept as-is — they
-# may have been shuffled by a previous destroy+create cycle, but the IP is
-# valid and reachable, so re-allocating would only create churn.
+# IP allocation: caller-provided IP wins, otherwise allocate the first free
+# IP from the pool (ip_list minus already-used IPs).
 # ---------------------------------------------------------------------------
-- name: Add — check if existing IP is in pool
+- name: Add — use provided IP
   ansible.builtin.set_fact:
-    _existing_ip: "{{ existing[0].ip if existing | length > 0 else '' }}"
-    _existing_in_pool: "{{ (existing | length > 0) and (existing[0].ip is defined) and (existing[0].ip in ip_list) }}"
+    next_ip: "{{ target_item.ip }}"
+  when: target_item.ip is defined
 
-- name: Add — delete ghost entry (IP outside pool)
+- name: Add — allocate first free pool IP
+  ansible.builtin.set_fact:
+    used_ips: "{{ pool_overrides | map(attribute='ip') | flatten | intersect(ip_list) }}"
+  when: target_item.ip is not defined
+
+- name: Add — allocate first free pool IP (actual)
+  ansible.builtin.set_fact:
+    next_ip: "{{ ip_list | reject('in', used_ips) | first }}"
+  when: target_item.ip is not defined
+
+- name: Add — fail if pool exhausted
+  ansible.builtin.fail:
+    msg: "Pool exhausted — no free IPs in {{ ip_pool.start }}-{{ ip_pool.end }}"
+  when: next_ip is not defined
+
+- name: Add — debug planned IP
+  ansible.builtin.debug:
+    msg: "Allocating {{ target_item.hostname }}.{{ target_item.domain }} -> {{ next_ip }}"
+
+# ---------------------------------------------------------------------------
+# Steamroller: delete → create → verify. Clear whatever exists (ignore
+# not-found), then enforce the desired state. CRUD operations are requests
+# that can fail or be denied, so each step retries on transient errors.
+# ---------------------------------------------------------------------------
+- name: Delete — remove host override (ignore not found)
   ansible.builtin.uri:
     url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/host_overrides?host={{ target_item.hostname }}&domain={{ target_item.domain }}"
     method: DELETE
     headers:
       x-api-key: "{{ pfsense_api_key }}"
     validate_certs: false
-    status_code: [200]
-  when:
-    - existing | length > 0
-    - not _existing_in_pool
-  register: _ghost_deleted
+    status_code: [200, 404]
+  retries: 3
+  delay: 2
+  until: _delete_result.status in [200, 404]
+  register: _delete_result
 
-- name: Add — apply DNS after ghost deletion
-  pfrest.pfsense.services_dns_resolver_apply:
-    api_host: "{{ pfsense_host }}"
-    api_key: "{{ pfsense_api_key }}"
-    api_protocol: https
+- name: Apply — DNS resolver changes after delete
+  ansible.builtin.uri:
+    url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      x-api-key: "{{ pfsense_api_key }}"
     validate_certs: false
-  when: _ghost_deleted is changed
+    status_code: [200, 202]
 
-- name: Add — refresh pool overrides after ghost deletion
-  pfrest.pfsense.services_dns_resolver_host_overrides_info:
-    api_host: "{{ pfsense_host }}"
-    api_key: "{{ pfsense_api_key }}"
-    api_protocol: https
-    validate_certs: false
-  register: _refreshed_overrides
-  when: _ghost_deleted is changed
+- name: Wait — for Unbound to settle after delete
+  ansible.builtin.pause:
+    seconds: 3
 
-- name: Add — update facts after ghost deletion
-  ansible.builtin.set_fact:
-    pool_overrides: "{{ _refreshed_overrides.data | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | sort(attribute='ip') if (_ghost_deleted is changed) else pool_overrides }}"
-    existing: []
-  when: _ghost_deleted is changed
-
-# ---------------------------------------------------------------------------
-# IP resolution: caller-provided IP wins, otherwise allocate the first free
-# IP from the pool (ip_list minus already-used IPs), and fail loudly if the
-# pool is exhausted.
-# ---------------------------------------------------------------------------
-- name: Add — use provided IP
-  ansible.builtin.set_fact:
-    next_ip: "{{ target_item.ip }}"
-  when:
-    - existing | length == 0
-    - target_item.ip is defined
-
-- name: Add — allocate first free pool IP
-  ansible.builtin.set_fact:
-    used_ips: "{{ pool_overrides | map(attribute='ip') | flatten | intersect(ip_list) }}"
-  when:
-    - existing | length == 0
-    - target_item.ip is not defined
-
-- name: Add — allocate first free pool IP (actual)
-  ansible.builtin.set_fact:
-    next_ip: "{{ ip_list | reject('in', used_ips) | first }}"
-  when:
-    - existing | length == 0
-    - target_item.ip is not defined
-
-- name: Add — fail if pool exhausted
-  ansible.builtin.fail:
-    msg: "Pool exhausted — no free IPs in {{ ip_pool.start }}-{{ ip_pool.end }}"
-  when:
-    - existing | length == 0
-    - next_ip is not defined
-
-- name: Add — skip if target already exists (in-pool, valid)
-  ansible.builtin.debug:
-    msg: "{{ target_item.hostname }}.{{ target_item.domain }} already exists in pool ({{ _existing_ip }}) — skipping"
-  when:
-    - existing | length > 0
-    - _existing_in_pool
-
-- name: Add — debug planned IP
-  ansible.builtin.debug:
-    msg: "Allocating {{ target_item.hostname }}.{{ target_item.domain }} -> {{ next_ip }}"
-  when: existing | length == 0
-
-# ---------------------------------------------------------------------------
-# Create + verify loop: request creation (idempotent), apply DNS, wait,
-# then verify the entry exists in the override list. If not found, loop
-# back and try again. CRUD operations are requests — they can fail or be
-# denied, so each attempt must handle that gracefully. Fail hard after
-# max retries.
-# ---------------------------------------------------------------------------
-- name: Add — create host override (retry loop)
+- name: Create — host override (retry loop)
   ansible.builtin.uri:
     url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/host_overrides"
     method: POST
@@ -135,14 +85,13 @@
       ip:
         - "{{ next_ip }}"
     validate_certs: false
-    status_code: [200, 201, 409]
+    status_code: [200, 201]
   register: _create_result
   retries: 3
   delay: 5
   until: _create_result.status in [200, 201]
-  when: existing | length == 0
 
-- name: Add — apply DNS resolver changes
+- name: Apply — DNS resolver changes after create
   ansible.builtin.uri:
     url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/apply"
     method: POST
@@ -150,14 +99,17 @@
       x-api-key: "{{ pfsense_api_key }}"
     validate_certs: false
     status_code: [200, 202]
-  when: existing | length == 0
 
-- name: Add — wait for Unbound propagation
+- name: Wait — for Unbound propagation
   ansible.builtin.pause:
     seconds: 5
-  when: existing | length == 0
 
-- name: Add — verify entry exists in pfSense overrides (retry loop)
+# ---------------------------------------------------------------------------
+# Verify: confirm the entry exists in the override list and resolves
+# correctly. If not found, loop back and retry creation. Fail hard
+# after max retries — Terraform's outer retry loop handles escalation.
+# ---------------------------------------------------------------------------
+- name: Verify — entry exists in pfSense overrides
   ansible.builtin.uri:
     url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/host_overrides?host={{ target_item.hostname }}&domain={{ target_item.domain }}"
     method: GET
@@ -170,15 +122,15 @@
   delay: 5
   until: >
     (_verify_result.json.data | default([]) | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | length) > 0
-  when: existing | length == 0
 
+# ---------------------------------------------------------------------------
+# Refresh pool overrides fact so subsequent hosts see updated state.
+# ---------------------------------------------------------------------------
 - name: Add — refresh pool overrides after creation
   ansible.builtin.set_fact:
-    pool_overrides: "{{ _verify_result.json.data | default([]) | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | sort(attribute='ip') if (existing | length == 0) else pool_overrides }}"
-    used_ips: "{{ _verify_result.json.data | default([]) | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | map(attribute='ip') | flatten | intersect(ip_list) if (existing | length == 0) else used_ips }}"
-  when: existing | length == 0
+    pool_overrides: "{{ _verify_result.json.data | default([]) | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | sort(attribute='ip') }}"
+    used_ips: "{{ _verify_result.json.data | default([]) | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | map(attribute='ip') | flatten | intersect(ip_list) }}"
 
 - name: Add — display result
   ansible.builtin.debug:
     msg: "Added {{ target_item.hostname }}.{{ target_item.domain }} = {{ next_ip }}"
-  when: existing | length == 0
