@@ -72,21 +72,24 @@
     seconds: 3
 
 - name: Create — host override (retry loop)
-  pfrest.pfsense.services_dns_resolver_host_override:
-    api_host: "{{ pfsense_host }}"
-    api_key: "{{ pfsense_api_key }}"
-    api_protocol: https
+  ansible.builtin.uri:
+    url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/host_overrides"
+    method: PUT
+    headers:
+      x-api-key: "{{ pfsense_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      host: "{{ target_item.hostname }}"
+      domain: "{{ target_item.domain }}"
+      ip:
+        - "{{ next_ip }}"
     validate_certs: false
-    state: present
-    lookup_fields: ["host", "domain"]
-    host: "{{ target_item.hostname }}"
-    domain: "{{ target_item.domain }}"
-    ip:
-      - "{{ next_ip }}"
+    status_code: [200, 201]
   register: _create_result
   retries: 3
   delay: 5
-  until: _create_result is not failed
+  until: _create_result.status in [200, 201]
 
 - name: Apply — DNS resolver changes after create
   ansible.builtin.uri:
