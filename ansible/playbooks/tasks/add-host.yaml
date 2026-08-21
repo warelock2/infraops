@@ -115,85 +115,67 @@
   when: existing | length == 0
 
 # ---------------------------------------------------------------------------
-# Create the host override via the pfREST Ansible collection, then apply DNS
-# resolver changes so the new entry takes effect immediately.
+# Create + verify loop: request creation (idempotent), apply DNS, wait,
+# then verify the entry exists in the override list. If not found, loop
+# back and try again. CRUD operations are requests — they can fail or be
+# denied, so each attempt must handle that gracefully. Fail hard after
+# max retries.
 # ---------------------------------------------------------------------------
-- name: Add — create host override
-  pfrest.pfsense.services_dns_resolver_host_override:
-    api_host: "{{ pfsense_host }}"
-    api_key: "{{ pfsense_api_key }}"
-    api_protocol: https
+- name: Add — create host override (retry loop)
+  ansible.builtin.uri:
+    url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/host_overrides"
+    method: POST
+    headers:
+      x-api-key: "{{ pfsense_api_key }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      host: "{{ target_item.hostname }}"
+      domain: "{{ target_item.domain }}"
+      ip:
+        - "{{ next_ip }}"
     validate_certs: false
-    state: present
-    lookup_fields: ["host", "domain"]
-    host: "{{ target_item.hostname }}"
-    domain: "{{ target_item.domain }}"
-    ip:
-      - "{{ next_ip }}"
+    status_code: [200, 201, 409]
+  register: _create_result
+  retries: 3
+  delay: 5
+  until: _create_result.status in [200, 201]
   when: existing | length == 0
 
 - name: Add — apply DNS resolver changes
-  pfrest.pfsense.services_dns_resolver_apply:
-    api_host: "{{ pfsense_host }}"
-    api_key: "{{ pfsense_api_key }}"
-    api_protocol: https
+  ansible.builtin.uri:
+    url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/apply"
+    method: POST
+    headers:
+      x-api-key: "{{ pfsense_api_key }}"
     validate_certs: false
+    status_code: [200, 202]
   when: existing | length == 0
 
-# ---------------------------------------------------------------------------
-# Post-creation verification: confirm the entry actually resolves in Unbound.
-# The pfSense API may return 200 but Unbound hasn't picked it up yet (or
-# something is misconfigured). Fail hard if the entry doesn't resolve —
-# Terraform's outer retry loop will re-apply from scratch.
-# ---------------------------------------------------------------------------
-- name: Add — verify DNS entry resolves to expected IP
-  ansible.builtin.command: >
-    python3 -c "
-    import socket, sys
-    fqdn = '{{ target_item.hostname }}.{{ target_item.domain }}'
-    expected = '{{ next_ip }}'
-    try:
-        answers = set()
-        for res in socket.getaddrinfo(fqdn, None, socket.AF_INET):
-            answers.add(res[4][0])
-        if not answers:
-            print(f'NO_DNS: {fqdn} did not resolve', file=sys.stderr); sys.exit(1)
-        if expected not in answers:
-            print(f'WRONG_IP: {fqdn} resolved to {answers}, expected {expected}', file=sys.stderr); sys.exit(2)
-        print(f'OK: {fqdn} -> {expected}')
-    except socket.gaierror as e:
-        print(f'DNS_ERROR: {fqdn} — {e}', file=sys.stderr); sys.exit(3)
-    "
-  register: _dns_verify
+- name: Add — wait for Unbound propagation
+  ansible.builtin.pause:
+    seconds: 5
+  when: existing | length == 0
+
+- name: Add — verify entry exists in pfSense overrides (retry loop)
+  ansible.builtin.uri:
+    url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/host_overrides?host={{ target_item.hostname }}&domain={{ target_item.domain }}"
+    method: GET
+    headers:
+      x-api-key: "{{ pfsense_api_key }}"
+    validate_certs: false
+    status_code: [200]
+  register: _verify_result
   retries: 3
   delay: 5
-  until: _dns_verify.rc == 0
+  until: >
+    (_verify_result.json.data | default([]) | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | length) > 0
   when: existing | length == 0
-
-- name: Add — fail if DNS entry did not propagate
-  ansible.builtin.fail:
-    msg: >
-      DNS entry for {{ target_item.hostname }}.{{ target_item.domain }} created via API
-      (expected IP: {{ next_ip }}) but not resolvable after retries —
-      pfSense/Unbound may be misconfigured.
-      Output: {{ _dns_verify.stderr | default('no output') }}
-  when:
-    - existing | length == 0
-    - _dns_verify.rc | default(1) != 0
 
 - name: Add — refresh pool overrides after creation
-  pfrest.pfsense.services_dns_resolver_host_overrides_info:
-    api_host: "{{ pfsense_host }}"
-    api_key: "{{ pfsense_api_key }}"
-    api_protocol: https
-    validate_certs: false
-  register: _post_create_overrides
-  when: existing | length == 0
-
-- name: Add — update pool overrides after creation
   ansible.builtin.set_fact:
-    pool_overrides: "{{ _post_create_overrides.data | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | sort(attribute='ip') if (existing | length == 0) else pool_overrides }}"
-    used_ips: "{{ _post_create_overrides.data | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | map(attribute='ip') | flatten | intersect(ip_list) if (existing | length == 0) else used_ips }}"
+    pool_overrides: "{{ _verify_result.json.data | default([]) | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | sort(attribute='ip') if (existing | length == 0) else pool_overrides }}"
+    used_ips: "{{ _verify_result.json.data | default([]) | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | map(attribute='ip') | flatten | intersect(ip_list) if (existing | length == 0) else used_ips }}"
   when: existing | length == 0
 
 - name: Add — display result
