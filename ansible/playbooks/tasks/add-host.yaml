@@ -140,6 +140,47 @@
     validate_certs: false
   when: existing | length == 0
 
+# ---------------------------------------------------------------------------
+# Post-creation verification: confirm the entry actually resolves in Unbound.
+# The pfSense API may return 200 but Unbound hasn't picked it up yet (or
+# something is misconfigured). Fail hard if the entry doesn't resolve —
+# Terraform's outer retry loop will re-apply from scratch.
+# ---------------------------------------------------------------------------
+- name: Add — verify DNS entry resolves to expected IP
+  ansible.builtin.command: >
+    python3 -c "
+    import socket, sys
+    fqdn = '{{ target_item.hostname }}.{{ target_item.domain }}'
+    expected = '{{ next_ip }}'
+    try:
+        answers = set()
+        for res in socket.getaddrinfo(fqdn, None, socket.AF_INET):
+            answers.add(res[4][0])
+        if not answers:
+            print(f'NO_DNS: {fqdn} did not resolve', file=sys.stderr); sys.exit(1)
+        if expected not in answers:
+            print(f'WRONG_IP: {fqdn} resolved to {answers}, expected {expected}', file=sys.stderr); sys.exit(2)
+        print(f'OK: {fqdn} -> {expected}')
+    except socket.gaierror as e:
+        print(f'DNS_ERROR: {fqdn} — {e}', file=sys.stderr); sys.exit(3)
+    "
+  register: _dns_verify
+  retries: 3
+  delay: 5
+  until: _dns_verify.rc == 0
+  when: existing | length == 0
+
+- name: Add — fail if DNS entry did not propagate
+  ansible.builtin.fail:
+    msg: >
+      DNS entry for {{ target_item.hostname }}.{{ target_item.domain }} created via API
+      (expected IP: {{ next_ip }}) but not resolvable after retries —
+      pfSense/Unbound may be misconfigured.
+      Output: {{ _dns_verify.stderr | default('no output') }}
+  when:
+    - existing | length == 0
+    - _dns_verify.rc | default(1) != 0
+
 - name: Add — refresh pool overrides after creation
   pfrest.pfsense.services_dns_resolver_host_overrides_info:
     api_host: "{{ pfsense_host }}"
