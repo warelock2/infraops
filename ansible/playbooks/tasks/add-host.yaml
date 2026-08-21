@@ -73,8 +73,8 @@
 
 - name: Create — host override (retry loop)
   ansible.builtin.uri:
-    url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/host_overrides/{{ target_item.hostname }}/{{ target_item.domain }}"
-    method: PUT
+    url: "https://{{ pfsense_host }}/api/v2/services/dns_resolver/host_override"
+    method: POST
     headers:
       x-api-key: "{{ pfsense_api_key }}"
       Content-Type: application/json
