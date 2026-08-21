@@ -121,7 +121,7 @@
   retries: 3
   delay: 5
   until: >
-    (_verify_result.json.data | default([]) | selectattr('ip', 'defined') | selectattr('ip.0', 'in', ip_list) | list | length) > 0
+    (_verify_result.json.data | default([]) | selectattr('host', 'equalto', target_item.hostname) | selectattr('domain', 'equalto', target_item.domain) | selectattr('ip', 'defined') | list | length) > 0
 
 # ---------------------------------------------------------------------------
 # Refresh pool overrides fact so subsequent hosts see updated state.
