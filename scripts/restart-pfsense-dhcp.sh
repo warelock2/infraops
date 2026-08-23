@@ -12,24 +12,15 @@
 # after the Terraform apply loop and BEFORE Ansible config management, so
 # Ansible only ever sees unpolluted DNS.
 #
-#   1. Read the pfSense API key from Vault.
-#   2. Verify every provisioned VM FQDN resolves to ONLY IPs inside the IaC
-#      pool (192.168.0.40-49).
-#   3. If any out-of-pool ("ghost") answer exists, DELETE each ghost lease
-#      from dhcpd.leases (stop dhcpd -> sed the lease block) BEFORE the
-#      restart. Restarting first would just re-register the ghost, since
-#      dhcpleases rebuilds Unbound from the leases file.
-#   4. THEN restart dhcpd (POST /api/v2/services/dhcp_server/apply) so
-#      dhcpleases regenerates Unbound from the now-clean leases file, and
-#      re-verify. The step only fails if a ghost persists after deletion,
-#      so the pipeline self-heals transient DNS pollution instead of
-#      stopping the show.
-#
-# Usage:
-#   VAULT_TOKEN=... sh scripts/restart-pfsense-dhcp.sh
-#
-# The FQDN list is derived from conf/infrastructure.yaml: hosts tagged
-# infrastructure_provisioning plus every node VM of provisioned clusters.
+# Remediate in stages:
+#   Stage 1: delete ghost DHCP leases -> restart DHCP (triggers dhcpleases
+#            resync of Unbound local-data) -> re-verify.
+#   Stage 2: restart DNS resolver (dns_resolver/apply) so Unbound fully
+#            reloads its config and clears its message cache -> re-verify.
+# After all remediation, gate with compare_dns(): authoritative query vs
+# chain query. If the chain returns any IP not present in the authoritative
+# answer, fail with an explicit diagnostic — something upstream is serving
+# stale data and must be rooted out before the pipeline proceeds.
 # ===========================================================================
 set -ex
 
@@ -95,22 +86,17 @@ echo "Provisioned FQDNs: $PROVISIONED_FQDNS"
   exit 0
 }
 
-echo "=== Verifying DNS is clean for all provisioned VMs ==="
-# resolve_fqdn prints every IPv4 answer for an FQDN, one per line.
+# resolve_fqdn via nslookup against a given DNS server.
+# Usage: resolve_fqdn <fqdn> [<server>]
+# If server is provided, query that server directly; otherwise use system resolver.
 resolve_fqdn() {
-  python3 - "$1" <<'PYEOF'
-import socket, sys
-fqdn = sys.argv[1]
-seen = set()
-try:
-    for res in socket.getaddrinfo(fqdn, None, socket.AF_INET):
-        ip = res[4][0]
-        if ip not in seen:
-            seen.add(ip)
-            print(ip)
-except socket.gaierror:
-    pass
-PYEOF
+  fqdn="$1"
+  server="$2"
+  if [ -n "$server" ]; then
+    nslookup "$fqdn" "$server" 2>/dev/null | awk '/^Name:/{seen=1;next} seen && /^Address: [0-9]/{print $2}'
+  else
+    nslookup "$fqdn" 2>/dev/null | awk '/^Name:/{seen=1;next} seen && /^Address: [0-9]/{print $2}'
+  fi
 }
 
 # ip_in_pool returns 0 if ip is within the IaC pool, 1 otherwise.
@@ -159,9 +145,10 @@ delete_ghost_lease() {
   echo "  Ghost lease $target_item removed from dhcpd.leases"
 }
 
-# verify_dns resolves every provisioned FQDN, prints OK/GHOST per answer, and
-# sets GHOST_IPS to the out-of-pool answers found (space separated). Returns
-# 0 when DNS is clean, 1 when at least one ghost survived.
+# verify_dns resolves every provisioned FQDN against pfSense directly,
+# prints OK/GHOST per answer, and sets GHOST_IPS to the out-of-pool answers
+# found (space separated). Returns 0 when DNS is clean, 1 when at least one
+# ghost survived.
 verify_dns() {
   GHOST_IPS=""
   GHOSTS=0
@@ -169,7 +156,7 @@ verify_dns() {
     # Retry resolution so a just-restarted resolver doesn't trip a stale cache.
     IP_LIST=""
     for attempt in 1 2 3; do
-      IP_LIST=$(resolve_fqdn "$fqdn")
+      IP_LIST=$(resolve_fqdn "$fqdn" "$PFSENSE_HOST")
       [ -n "$IP_LIST" ] && break
       echo "  $fqdn not resolvable yet (attempt $attempt/3) — retrying"
       sleep 3
@@ -189,17 +176,56 @@ verify_dns() {
   [ "$GHOSTS" -eq 0 ]
 }
 
+# compare_dns checks if normal chain resolution matches authoritative query.
+# Returns 0 if they match, 1 if chain has extras not in authoritative.
+# On mismatch, prints explicit diagnostic.
+compare_dns() {
+  MISMATCH=0
+  for fqdn in $PROVISIONED_FQDNS; do
+    AUTH_IPS=$(resolve_fqdn "$fqdn" "$PFSENSE_HOST")
+    CHAIN_IPS=$(resolve_fqdn "$fqdn")
+
+    # If authoritative returns nothing, we can't validate — treat as error
+    [ -n "$AUTH_IPS" ] || {
+      echo "ERROR: authoritative DNS ($PFSENSE_HOST) returned no answer for $fqdn" >&2
+      MISMATCH=1
+      continue
+    }
+
+    # Check for chain extras (IPs in chain not in authoritative)
+    CHAIN_EXTRAS=""
+    for cip in $CHAIN_IPS; do
+      FOUND=0
+      for aip in $AUTH_IPS; do
+        [ "$cip" = "$aip" ] && { FOUND=1; break; }
+      done
+      [ $FOUND -eq 0 ] && CHAIN_EXTRAS="$CHAIN_EXTRAS $cip"
+    done
+
+    if [ -n "$CHAIN_EXTRAS" ]; then
+      echo "DNS CACHE POLLUTION: $fqdn chain returned extra IPs:$CHAIN_EXTRAS not present on authoritative $PFSENSE_HOST (authoritative: $AUTH_IPS)" >&2
+      MISMATCH=1
+    fi
+  done
+  [ $MISMATCH -eq 0 ]
+}
+
+echo "=== Stage 0: Initial DNS verification ==="
 if verify_dns; then
-  echo "=== DNS clean: every provisioned VM resolves only to pool IPs ==="
-  exit 0
+  echo "=== DNS clean on initial check ==="
+  if compare_dns; then
+    echo "=== Authoritative and chain DNS agree — proceeding ==="
+    exit 0
+  fi
+  echo "=== Initial DNS clean but chain differs — entering remediation ==="
 fi
 
-echo "=== Auto-deleting ghost DHCP leases found by DNS check ==="
+echo "=== Stage 1: Delete ghost leases + restart DHCP ==="
 for ghost_ip in $GHOST_IPS; do
   delete_ghost_lease "$ghost_ip"
 done
 
-echo "=== Restarting pfSense DHCP service after lease deletion (apply) ==="
+echo "=== Restarting pfSense DHCP service (apply) ==="
 HTTP_CODE=$(curl -k -sS -o /tmp/dhcp_apply.json -w '%{http_code}' \
   -X POST \
   -H "x-api-key: $PFSENSE_API_KEY" \
@@ -214,35 +240,44 @@ echo "apply HTTP $HTTP_CODE"
 echo "=== Waiting for DHCP/DNS to settle ==="
 sleep 15
 
-echo "=== Re-verifying DNS after ghost lease deletion ==="
-# Increased retries and wait time for DNS propagation
-GHOST_IPS=""
-GHOSTS=0
-for fqdn in $PROVISIONED_FQDNS; do
-  IP_LIST=""
-  for attempt in 1 2 3 4 5 6; do
-    IP_LIST=$(resolve_fqdn "$fqdn")
-    [ -n "$IP_LIST" ] && break
-    echo "  $fqdn not resolvable yet (attempt $attempt/6) — retrying"
-    sleep 5
-  done
-  [ -n "$IP_LIST" ] || { echo "ERROR: $fqdn does not resolve at all" >&2; GHOSTS=1; continue; }
-
-  for ip in $IP_LIST; do
-    if ip_in_pool "$ip"; then
-      echo "  OK: $fqdn -> $ip (in pool)"
-    else
-      echo "  GHOST: $fqdn -> $ip (outside pool)" >&2
-      GHOST_IPS="$GHOST_IPS $ip"
-      GHOSTS=1
-    fi
-  done
-done
-
-if [ "$GHOSTS" -eq 0 ]; then
-  echo "=== DNS clean after deleting ghost lease(s): $GHOST_IPS ==="
-  exit 0
+echo "=== Stage 1 re-verification ==="
+if verify_dns; then
+  echo "=== DNS clean after Stage 1 ==="
+  if compare_dns; then
+    echo "=== Authoritative and chain DNS agree after Stage 1 — proceeding ==="
+    exit 0
+  fi
+  echo "=== Stage 1 DNS clean but chain differs — escalating to Stage 2 ==="
 fi
 
-echo "FATAL: out-of-pool DNS answers survived the DHCP restart AND ghost-lease deletion — refusing to proceed" >&2
-exit 1
+echo "=== Stage 2: Restart DNS resolver (dns_resolver/apply) ==="
+HTTP_CODE=$(curl -k -sS -o /tmp/dns_apply.json -w '%{http_code}' \
+  -X POST \
+  -H "x-api-key: $PFSENSE_API_KEY" \
+  "https://$PFSENSE_HOST/api/v2/services/dns_resolver/apply")
+echo "dns_resolver/apply HTTP $HTTP_CODE"
+[ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "202" ] || {
+  echo "ERROR: DNS resolver apply failed (HTTP $HTTP_CODE)" >&2
+  cat /tmp/dns_apply.json >&2 || true
+  exit 1
+}
+
+echo "=== Waiting for DNS resolver to settle ==="
+sleep 15
+
+echo "=== Stage 2 re-verification ==="
+if verify_dns; then
+  echo "=== DNS clean after Stage 2 ==="
+else
+  echo "FATAL: out-of-pool DNS answers survived Stage 2 remediation" >&2
+  exit 1
+fi
+
+echo "=== Final gate: Authoritative vs Chain comparison ==="
+if compare_dns; then
+  echo "=== Authoritative and chain DNS agree — proceeding ==="
+  exit 0
+else
+  echo "FATAL: chain DNS differs from authoritative after all remediation — pipeline stopped" >&2
+  exit 1
+fi
