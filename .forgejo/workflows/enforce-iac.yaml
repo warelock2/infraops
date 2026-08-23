@@ -103,6 +103,17 @@ jobs:
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
+      - name: DNS Consistency Enforcement
+        id: dns-enforce
+        if: github.ref == 'refs/heads/master'
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
+        with:
+          args: sh scripts/enforce-dns-consistency.sh
+        env:
+          VAULT_ADDR: https://vault.afobl.com
+          VAULT_SKIP_VERIFY: "true"
+          VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
+
       - name: Terraform Plan
         id: plan
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
