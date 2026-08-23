@@ -20,7 +20,10 @@ set -e
 export VAULT_ADDR="${VAULT_ADDR:-https://vault.afobl.com}"
 export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-true}"
 
-INFRA="/home/warelock/projects/infraops/conf/infrastructure.yaml"
+# Resolve repo root relative to this script — the CI workspace lives at a
+# different absolute path than a dev checkout, so hardcoded paths break.
+BASE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+INFRA="$BASE/conf/infrastructure.yaml"
 
 echo "=== Reading pfSense credentials from Vault ==="
 PFSENSE_HOST=$(yq -r '[.hosts[] | select(.services? != null) | select(.services[]? == "dns")][0].connection.host' "$INFRA")
@@ -80,14 +83,11 @@ for i in $(seq 0 $((CLUSTER_COUNT - 1))); do
   done
 done
 
-# Standalone hosts with infrastructure_provisioning enforcement
-STANDALONE_COUNT=$(yq '.hosts | length' "$INFRA")
-for i in $(seq 0 $((STANDALONE_COUNT - 1))); do
-  ENFORCEMENT=$(yq ".hosts[$i].enforcement // []" "$INFRA" | jq -r '.[]' 2>/dev/null | tr '\n' ' ')
-  if echo "$ENFORCEMENT" | grep -q "infrastructure_provisioning"; then
-    HOSTNAME=$(yq ".hosts[$i].name" "$INFRA")
-    MANAGED_HOSTS="${MANAGED_HOSTS}${HOSTNAME} "
-  fi
+# Standalone hosts with infrastructure_provisioning enforcement.
+# Single yq pass — piping yq YAML output into jq (the old approach) can't
+# parse; the []? optional-chain mirrors the .services[]? filters above.
+for HOSTNAME in $(yq -r '.hosts[] | select(.enforcement[]? == "infrastructure_provisioning") | .name' "$INFRA"); do
+  MANAGED_HOSTS="${MANAGED_HOSTS}${HOSTNAME} "
 done
 
 echo "Managed hosts: $MANAGED_HOSTS"
@@ -103,8 +103,7 @@ is_in_pool() {
   ip_in_pool "$ip"
 }
 
-# Build a map: hostname -> list of override UIDs with their IPs
-# We'll use jq to process the JSON
+# Analyze overrides per managed hostname using jq over the cached JSON
 echo "=== Analyzing current overrides ==="
 DIRTY=0
 CHANGES=""
@@ -114,60 +113,63 @@ for HOSTNAME in $MANAGED_HOSTS; do
   DOMAIN="${HOSTNAME#*.}"
   [ "$HNAME" = "$HOSTNAME" ] && DOMAIN="$DNS_DOMAIN"
 
-  # Find all overrides matching this hostname
-  MATCHES=$(echo "$OVERRIDES_JSON" | jq -r --arg h "$HNAME" --arg d "$DOMAIN" '.data[] | select(.host == $h and .domain == $d) | "\(.uuid) \(.ip[0])"' 2>/dev/null)
+  # Find all override IPs matching this hostname. The pfSense v2 API exposes
+  # no record ID we can verify against this repo — every in-repo CRUD path
+  # (add-host.yaml / delete-host.yaml) addresses records by host+domain query
+  # params on the plural endpoint, so we collect IPs only.
+  MATCHES=$(echo "$OVERRIDES_JSON" | jq -r --arg h "$HNAME" --arg d "$DOMAIN" '.data[] | select(.host == $h and .domain == $d) | .ip[0]' 2>/dev/null)
 
   if [ -z "$MATCHES" ]; then
-    # No override exists — create one via add workflow
-    echo "MISSING: $HOSTNAME.$DOMAIN — will create via add workflow"
-    CHANGES="${CHANGES} create:${HOSTNAME}.${DOMAIN}"
+    # No override exists — create via add workflow (short name, the same
+    # invocation shape as Terraform's dns_alloc local-exec)
+    echo "MISSING: $HNAME.$DOMAIN — will create via add workflow"
+    CHANGES="${CHANGES} create:${HNAME}"
     DIRTY=1
     continue
   fi
 
-  IN_POOL_UID=""
-  IN_POOL_IP=""
-  OUT_OF_POOL_UIDS=""
-  OUT_OF_POOL_IPS=""
-
-  while read -r uid ip; do
-    [ -z "$uid" ] && continue
+  KEEP_IP=""
+  EXTRAS=0
+  for ip in $MATCHES; do
     if ip_in_pool "$ip"; then
-      if [ -z "$IN_POOL_UID" ]; then
-        IN_POOL_UID="$uid"
-        IN_POOL_IP="$ip"
+      if [ -z "$KEEP_IP" ]; then
+        KEEP_IP="$ip"
       else
-        # Second in-pool entry for same hostname — duplicate
-        echo "DUPLICATE IN-POOL: $HOSTNAME.$DOMAIN has multiple in-pool entries (uid=$uid, ip=$ip) — will delete extra"
-        OUT_OF_POOL_UIDS="${OUT_OF_POOL_UIDS} $uid"
-        OUT_OF_POOL_IPS="${OUT_OF_POOL_IPS} $ip"
-        DIRTY=1
+        echo "DUPLICATE IN-POOL: $HNAME.$DOMAIN has multiple in-pool entries ($ip) — will collapse"
+        EXTRAS=$((EXTRAS + 1))
       fi
     else
-      echo "OUT-OF-POOL: $HOSTNAME.$DOMAIN has out-of-pool entry (uid=$uid, ip=$ip) — will delete"
-      OUT_OF_POOL_UIDS="${OUT_OF_POOL_UIDS} $uid"
-      OUT_OF_POOL_IPS="${OUT_OF_POOL_IPS} $ip"
-      DIRTY=1
+      echo "OUT-OF-POOL: $HNAME.$DOMAIN has out-of-pool entry ($ip) — will delete"
+      EXTRAS=$((EXTRAS + 1))
     fi
-  done <<EOF
-$MATCHES
-EOF
-
-  # Delete extra/out-of-pool entries
-  for uid in $OUT_OF_POOL_UIDS; do
-    echo "DELETING: override uid=$uid for $HOSTNAME.$DOMAIN"
-    curl -k -sS -X DELETE -H "x-api-key: $PFSENSE_API_KEY" "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_overrides/$uid" >/dev/null 2>&1 || { echo "WARNING: failed to delete override uid=$uid" >&2; }
   done
+
+  # Keeper alongside junk: with no verified per-record delete we use the
+  # proven host+domain query-param DELETE (delete-host.yaml pattern), then
+  # recreate the keeper verbatim via the proven singular-endpoint POST
+  # (add-host.yaml pattern). The keeper keeps its exact IP; resolver apply
+  # happens once at the end. Only-out-of-pool stays warn-only (KEEP_IP empty).
+  if [ -n "$KEEP_IP" ] && [ "$EXTRAS" -gt 0 ]; then
+    echo "REPAIRING: $HNAME.$DOMAIN — removing all entries, recreating keeper at $KEEP_IP"
+    curl -k -sS -X DELETE -H "x-api-key: $PFSENSE_API_KEY" \
+      "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_overrides?host=$HNAME&domain=$DOMAIN" >/dev/null || { echo "ERROR: failed to delete overrides for $HNAME.$DOMAIN" >&2; exit 1; }
+    curl -k -sS -X POST -H "x-api-key: $PFSENSE_API_KEY" -H "Content-Type: application/json" \
+      -d "{\"host\":\"$HNAME\",\"domain\":\"$DOMAIN\",\"ip\":[\"$KEEP_IP\"]}" \
+      "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_override" >/dev/null || { echo "ERROR: failed to recreate override for $HNAME.$DOMAIN at $KEEP_IP" >&2; exit 1; }
+    DIRTY=1
+  fi
 done
 
 if [ "$DIRTY" -eq 1 ]; then
   echo "=== Changes detected — applying pfSense DNS resolver ==="
-  # Create missing entries
+  # Create missing entries. Bare ansible-playbook invocation mirrors
+  # Terraform's dns_alloc local-exec, which works in this CI image with just
+  # the VAULT_* env this step already receives (no ANSIBLE_CONFIG needed).
   for change in $CHANGES; do
     if echo "$change" | grep -q "^create:"; then
       HOST="${change#create:}"
       echo "CREATING: $HOST via add workflow"
-      ansible-playbook /home/warelock/projects/infraops/ansible/playbooks/manage-iac-dns.yaml -e "workflow=add:${HOST}" || { echo "ERROR: failed to create override for $HOST" >&2; exit 1; }
+      ansible-playbook "$BASE/ansible/playbooks/manage-iac-dns.yaml" -e "workflow=add:${HOST}" || { echo "ERROR: failed to create override for $HOST" >&2; exit 1; }
     fi
   done
 

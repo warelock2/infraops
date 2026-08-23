@@ -51,7 +51,7 @@ for i in $(seq 0 $((CLUSTER_COUNT - 1))); do
   CP_NODES=$(yq ".clusters[$i].control_plane.nodes // 0" conf/infrastructure.yaml)
   WORKER_NODES=$(yq ".clusters[$i].workers.nodes // 0" conf/infrastructure.yaml)
   CP_STANDBY=$(yq ".clusters[$i].control_plane.standby // 0" conf/infrastructure.yaml)
-  WORKER_STANDBY=$(yq ".clusters[$i].workers.standby // 0" conf.infrastructure.yaml)
+  WORKER_STANDBY=$(yq ".clusters[$i].workers.standby // 0" conf/infrastructure.yaml)
   CP_PLANE_NAME=$(yq ".clusters[$i].plane_defaults.control_plane.plane_name // .defaults.planes.control_plane.plane_name" conf/infrastructure.yaml)
   WORKER_PLANE_NAME=$(yq ".clusters[$i].plane_defaults.workers.plane_name // .defaults.planes.workers.plane_name" conf/infrastructure.yaml)
   CP_VM_ID_START=$(yq ".clusters[$i].control_plane.vm_id_start" conf/infrastructure.yaml)
@@ -134,14 +134,32 @@ validate_announcement() {
     return 1
   fi
 
-  # 3. TCP :22 reachability + SSH banner at the override IP
+  # 3. TCP :22 reachability + SSH banner at the override IP.
+  # python3 socket instead of bash /dev/tcp: ci-base is Alpine-minimal, bash
+  # presence is unverified while python3 is guaranteed (same precedent as the
+  # K8s drain reachability probe). Socket timeouts replace external timeout(1).
   echo "VALIDATION: $hostname — probing SSH at $override_ip:22..." >&2
   local ssh_ok=0
   for attempt in 1 2 3; do
-    if timeout 5 bash -c "exec 3<>/dev/tcp/$override_ip/22; cat <&3" 2>/dev/null | grep -q '^SSH-2.0-'; then
-      ssh_ok=1
-      break
-    fi
+    BANNER=$(python3 -c '
+import socket, sys
+try:
+    s = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5)
+    s.settimeout(5)
+    try:
+        data = s.recv(64)
+    finally:
+        s.close()
+    sys.stdout.write(data.decode("utf-8", "replace"))
+except Exception:
+    pass
+' "$override_ip" 22)
+    case "$BANNER" in
+      SSH-2.0-*)
+        ssh_ok=1
+        break
+        ;;
+    esac
     echo "VALIDATION: $hostname — attempt $attempt/3 failed, retrying in 20s..." >&2
     sleep 20
   done
