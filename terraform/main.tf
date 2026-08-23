@@ -261,10 +261,16 @@ locals {
 resource "terraform_data" "dns_alloc" {
   for_each = local.vms
 
-  # Force the provisioner to re-run when VM config changes. Without this,
+  # Force the provisioner to re-run when VM hardware/config changes. Without this,
   # Terraform only runs local-exec when the resource is first created — stale
   # DNS entries from a previous apply (e.g. DHCP ghosts) would never be corrected.
-  triggers_replace = [each.key, sha256(jsonencode(each.value))]
+  # standby is operational state, not config; exclude so promotion doesn't replace VM.
+  triggers_replace = [each.key, sha256(jsonencode({
+    cores     = each.value.cores
+    memory    = each.value.memory
+    disk      = each.value.disk
+    datastore = each.value.datastore
+  }))]
 
   input = {
     name = each.key
