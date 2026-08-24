@@ -6,9 +6,23 @@
 # ACTUAL nodes kubeadm sees, and for any node that exists but shouldn't,
 # marks it unschedulable, drains workloads, then deletes the Node object.
 # This is what keeps the live cluster converged on the declared intent.
+#
+# Sequencing matters when shrinking the CONTROL plane: the departing nodes'
+# apiservers stay listening (and pass haproxy's plain TCP checks) even after
+# losing etcd membership, so traffic through the VIP keeps landing on
+# zombies and kubectl calls die mid-stream ("unexpected EOF", seen live in
+# runs #195/#196). Plays 2 and 3 therefore withdraw the departing nodes from
+# the data path BEFORE anything is removed: stop keepalived+haproxy on them
+# (VIP fails over to the survivor) and strip their backends from the
+# survivor's haproxy config. Only then do the etcd/node removals run.
+#
+# Remote plays reach the control nodes over the same SSH key the workflow
+# stages at /tmp/ansible_key for fetching admin.conf. They tolerate
+# unreachable hosts so a cleanup re-run after Terraform destroy still
+# converges (stale Node objects get deleted through the now-clean LB).
 # ===========================================================================
 ---
-- name: K8s Drain Removed Nodes
+- name: K8s Drain Removed Nodes — Compute
   hosts: localhost
   connection: local
   gather_facts: false
@@ -45,8 +59,8 @@
 
           print(' '.join(nodes))
           PYEOF
-      register: desired_nodes_raw
-      changed_when: false
+        register: desired_nodes_raw
+        changed_when: false
 
     - name: Set desired nodes fact
       ansible.builtin.set_fact:
@@ -84,6 +98,107 @@
         msg: "Workers to drain: {{ workers_to_remove }} | Control planes to remove: {{ cp_to_remove }}"
       when: nodes_to_remove | length > 0
 
+    - name: Read platform DNS domain and cluster VIP
+      ansible.builtin.set_fact:
+        _infra: "{{ lookup('file', playbook_dir ~ '/../../conf/infrastructure.yaml') | from_yaml }}"
+        _cluster_name: "{{ (desired_nodes | select('search', 'control') | list | first | default('', true)) | regex_replace('^k8s-(.+)-(?:control|worker)-\\d+$', '\\1') }}"
+
+    - name: Resolve cluster VIP
+      ansible.builtin.set_fact:
+        _cp_vip: "{{ (_infra.clusters | selectattr('name', 'equalto', _cluster_name) | list | first | default({}, true)).control_plane.vip | default('', true) }}"
+        _dns_domain: "{{ _infra.platform.proxmox.dns_domain }}"
+      when: _cluster_name | length > 0
+
+    - name: Identify surviving control plane
+      ansible.builtin.set_fact:
+        healthy_cp: "{{ (current_nodes | select('search', 'control') | list | difference(cp_to_remove))[0] }}"
+      when: cp_to_remove | length > 0
+
+    - name: Register departing control planes for live demotion
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: departing_cp
+        ansible_host: "{{ item }}.{{ _dns_domain }}"
+        ansible_user: ansible
+        ansible_ssh_private_key_file: /tmp/ansible_key
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+      loop: "{{ cp_to_remove }}"
+      when: cp_to_remove | length > 0
+
+    - name: Register surviving control plane for LB re-pointing
+      ansible.builtin.add_host:
+        name: "{{ healthy_cp }}"
+        groups: survivor_cp
+        ansible_host: "{{ healthy_cp }}.{{ _dns_domain }}"
+        ansible_user: ansible
+        ansible_ssh_private_key_file: /tmp/ansible_key
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
+      when: cp_to_remove | length > 0
+
+- name: K8s Drain Removed Nodes — Demote Departing Control Planes
+  hosts: departing_cp
+  gather_facts: false
+  ignore_unreachable: true
+  vars:
+    cp_to_remove: "{{ hostvars['localhost']['cp_to_remove'] }}"
+  tasks:
+    - name: Stop keepalived to release the VIP claim
+      ansible.builtin.systemd:
+        name: keepalived
+        state: stopped
+      become: true
+      ignore_errors: true
+
+    - name: Stop haproxy to stop fronting the local apiserver
+      ansible.builtin.systemd:
+        name: haproxy
+        state: stopped
+      become: true
+      ignore_errors: true
+
+- name: K8s Drain Removed Nodes — Repoint Surviving Load Balancer
+  hosts: survivor_cp
+  gather_facts: false
+  vars:
+    cp_to_remove: "{{ hostvars['localhost']['cp_to_remove'] }}"
+  tasks:
+    - name: Strip departing backends from haproxy config
+      ansible.builtin.shell:
+        cmd: |
+          if grep -Eq '^[[:space:]]*server {{ item }}([[:space:]]|$)' /etc/haproxy/haproxy.cfg; then
+            sudo sed -i -E '/^[[:space:]]*server {{ item }}([[:space:]]|$)/d' /etc/haproxy/haproxy.cfg
+            echo "changed"
+          fi
+        creates: /etc/haproxy/haproxy.cfg
+      loop: "{{ cp_to_remove }}"
+      register: haproxy_strip
+      changed_when: "'changed' in haproxy_strip.stdout"
+
+    - name: Validate and reload haproxy when backends changed
+      ansible.builtin.shell:
+        cmd: |
+          sudo haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null && sudo systemctl reload haproxy
+      when: haproxy_strip.results | map(attribute='stdout') | select('search', 'changed') | list | length > 0
+
+    - name: Wait for the API endpoint to answer on the VIP
+      ansible.builtin.wait_for:
+        host: "{{ hostvars['localhost']['_cp_vip'] }}"
+        port: 6443
+        timeout: 60
+      connection: local
+      delegate_to: localhost
+
+- name: K8s Drain Removed Nodes — Remove
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    cp_to_remove: "{{ hostvars['localhost']['cp_to_remove'] }}"
+    workers_to_remove: "{{ hostvars['localhost']['workers_to_remove'] }}"
+    nodes_to_remove: "{{ hostvars['localhost']['nodes_to_remove'] }}"
+    current_nodes: "{{ hostvars['localhost']['current_nodes'] }}"
+    healthy_cp: "{{ hostvars['localhost']['healthy_cp'] | default('') }}"
+  tasks:
     - name: Drain removed worker nodes
       ansible.builtin.command: >
         kubectl drain {{ item }}
@@ -94,11 +209,6 @@
       loop: "{{ workers_to_remove }}"
       when: workers_to_remove | length > 0
       ignore_errors: true
-
-    - name: Delete removed worker nodes
-      ansible.builtin.command: kubectl delete node {{ item }}
-      loop: "{{ workers_to_remove }}"
-      when: workers_to_remove | length > 0
 
     - name: Drain removed control plane nodes
       ansible.builtin.command: >
@@ -115,13 +225,6 @@
       ansible.builtin.shell:
         cmd: |
           set -e
-          # Fetching the member list can transiently fail ("error: unexpected
-          # EOF") right after a sibling member removal: the surviving etcd
-          # cluster is re-electing/reconfiguring while the departing nodes'
-          # apiservers are still behind the LB, so streams through the API
-          # server can drop. Retry until the fetch yields parseable output.
-          # Prints the member ID in hex, or ABSENT when the member is already
-          # gone (idempotent re-runs must not stall on the retry window).
           OUT=""
           for _ in 1 2 3 4 5; do
             OUT=$(kubectl exec -n kube-system etcd-{{ healthy_cp }} -- \
@@ -129,17 +232,14 @@
               --cacert /etc/kubernetes/pki/etcd/ca.crt \
               --cert /etc/kubernetes/pki/etcd/server.crt \
               --key /etc/kubernetes/pki/etcd/server.key \
-              member list -w json 2>/dev/null | python3 -c "import sys,json; m=[x for x in json.load(sys.stdin)['members'] if x['name']=='{{ item }}']; print(format(m[0]['ID'], 'x') if m else 'ABSENT')" 2>/dev/null) && [ -n "$OUT" ] && break
+              member list -w json 2>/dev/null | \
+              python3 -c "import sys,json; m=[x for x in json.load(sys.stdin)['members'] if x['name']=='{{ item }}']; print(format(m[0]['ID'],'x') if m else 'ABSENT')" 2>/dev/null) && [ -n "$OUT" ] && break
             sleep 5
           done
           if [ "$OUT" = "ABSENT" ]; then
             echo "{{ item }}: no such etcd member - already removed"
             exit 0
           fi
-          # etcdctl -w json yields the ID as a number; member remove parses HEX
-          # only — passing decimal digits makes ParseUint(…,16) overflow and
-          # abort the drain step (seen live as "bad member ID arg … value out
-          # of range"). format(..., 'x') emits the canonical lowercase hex.
           if [ -n "$OUT" ]; then
             kubectl exec -n kube-system etcd-{{ healthy_cp }} -- \
               etcdctl --endpoints=https://127.0.0.1:2379 \
@@ -153,11 +253,22 @@
           fi
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
-      vars:
-        healthy_cp: "{{ (current_nodes | select('search', 'control') | list | difference(cp_to_remove))[0] }}"
+
+    - name: Delete removed worker nodes
+      ansible.builtin.command: kubectl delete node {{ item }}
+      register: del_wrk
+      until: del_wrk.rc == 0
+      retries: 6
+      delay: 5
+      loop: "{{ workers_to_remove }}"
+      when: workers_to_remove | length > 0
 
     - name: Delete removed control plane nodes
       ansible.builtin.command: kubectl delete node {{ item }}
+      register: del_cp
+      until: del_cp.rc == 0
+      retries: 6
+      delay: 5
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
 
