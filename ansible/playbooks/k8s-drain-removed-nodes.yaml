@@ -120,7 +120,11 @@
             --cacert /etc/kubernetes/pki/etcd/ca.crt \
             --cert /etc/kubernetes/pki/etcd/server.crt \
             --key /etc/kubernetes/pki/etcd/server.key \
-            member list -w json | python3 -c "import sys,json; m=[x for x in json.load(sys.stdin)['members'] if x['name']=='{{ item }}']; print(m[0]['ID'] if m else '')")
+            member list -w json | python3 -c "import sys,json; m=[x for x in json.load(sys.stdin)['members'] if x['name']=='{{ item }}']; print(format(m[0]['ID'], 'x') if m else '')")
+          # etcdctl -w json yields the ID as a number; member remove parses HEX
+          # only — passing decimal digits makes ParseUint(…,16) overflow and
+          # abort the drain step (seen live as "bad member ID arg … value out
+          # of range"). format(..., 'x') emits the canonical lowercase hex.
           if [ -n "$MEMBER_ID" ]; then
             kubectl exec -n kube-system etcd-{{ healthy_cp }} -- \
               etcdctl --endpoints=https://127.0.0.1:2379 \
