@@ -9,17 +9,17 @@
 #
 # Sequencing matters when shrinking the CONTROL plane: the departing nodes'
 # apiservers stay listening (and pass haproxy's plain TCP checks) even after
-# losing etcd membership, so traffic through the VIP keeps landing on
-# zombies and kubectl calls die mid-stream ("unexpected EOF", seen live in
-# runs #195/#196). Plays 2 and 3 therefore withdraw the departing nodes from
-# the data path BEFORE anything is removed: stop keepalived+haproxy on them
-# (VIP fails over to the survivor) and strip their backends from the
-# survivor's haproxy config. Only then do the etcd/node removals run.
+# losing etcd membership, so traffic through the VIP keeps landing on zombies
+# and kubectl calls die mid-stream ("unexpected EOF", seen live in runs
+# #195/#196). Plays 2 and 3 therefore withdraw the departing nodes from the
+# data path BEFORE anything is removed: stop keepalived+haproxy on them (VIP
+# fails over to the survivor) and strip their backends from the survivor's
+# haproxy config. Only then do the etcd/node removals run.
 #
 # Remote plays reach the control nodes over the same SSH key the workflow
-# stages at /tmp/ansible_key for fetching admin.conf. They tolerate
-# unreachable hosts so a cleanup re-run after Terraform destroy still
-# converges (stale Node objects get deleted through the now-clean LB).
+# stages at /tmp/ansible_key for fetching admin.conf. They tolerate unreachable
+# hosts so a cleanup re-run after Terraform destroy still converges (stale Node
+# objects get deleted through the now-clean LB).
 # ===========================================================================
 ---
 - name: K8s Drain Removed Nodes — Compute
@@ -32,31 +32,24 @@
         cmd: |
           python3 << 'PYEOF'
           import yaml
-
           with open('{{ playbook_dir }}/../../conf/infrastructure.yaml') as f:
               infra = yaml.safe_load(f)
-
           nodes = []
           defaults = infra.get('defaults', {})
           cluster_type = defaults.get('cluster_type', 'k8s')
           planes = defaults.get('planes', {})
-
           for cluster in infra.get('clusters', []):
               enforcement = cluster.get('enforcement', [])
               if 'infrastructure_provisioning' not in enforcement:
                   continue
-
               ctype = cluster.get('cluster_type', cluster_type)
               name = cluster['name']
-
               for plane_key in ['control_plane', 'workers']:
                   plane_cfg = cluster.get(plane_key, {})
                   count = plane_cfg.get('nodes', 0)
                   plane_name = planes.get(plane_key, {}).get('plane_name', plane_key.replace('_', '-'))
-
                   for i in range(1, count + 1):
                       nodes.append(f'{ctype}-{name}-{plane_name}-{i:02d}')
-
           print(' '.join(nodes))
           PYEOF
         register: desired_nodes_raw
@@ -67,7 +60,8 @@
         desired_nodes: "{{ desired_nodes_raw.stdout.split() }}"
 
     - name: Get current cluster nodes
-      ansible.builtin.command: kubectl get nodes -o jsonpath='{.items[*].metadata.name}'
+      ansible.builtin.shell:
+        cmd: kubectl get nodes -o jsonpath='{.items[*].metadata.name}'
       register: current_nodes_raw
       changed_when: false
       failed_when: false
@@ -167,7 +161,7 @@
         cmd: |
           if grep -Eq '^[[:space:]]*server {{ item }}([[:space:]]|$)' /etc/haproxy/haproxy.cfg; then
             sudo sed -i -E '/^[[:space:]]*server {{ item }}([[:space:]]|$)/d' /etc/haproxy/haproxy.cfg
-            echo "changed"
+            echo changed
           fi
         creates: /etc/haproxy/haproxy.cfg
       loop: "{{ cp_to_remove }}"
@@ -176,8 +170,7 @@
 
     - name: Validate and reload haproxy when backends changed
       ansible.builtin.shell:
-        cmd: |
-          sudo haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null && sudo systemctl reload haproxy
+        cmd: sudo haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null && sudo systemctl reload haproxy
       when: haproxy_strip.results | map(attribute='stdout') | select('search', 'changed') | list | length > 0
 
     - name: Wait for the API endpoint to answer on the VIP
@@ -200,23 +193,15 @@
     healthy_cp: "{{ hostvars['localhost']['healthy_cp'] | default('') }}"
   tasks:
     - name: Drain removed worker nodes
-      ansible.builtin.command: >
-        kubectl drain {{ item }}
-        --ignore-daemonsets
-        --delete-emptydir-data
-        --force
-        --timeout=120s
+      ansible.builtin.command:
+        cmd: kubectl drain {{ item }} --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
       loop: "{{ workers_to_remove }}"
       when: workers_to_remove | length > 0
       ignore_errors: true
 
     - name: Drain removed control plane nodes
-      ansible.builtin.command: >
-        kubectl drain {{ item }}
-        --ignore-daemonsets
-        --delete-emptydir-data
-        --force
-        --timeout=120s
+      ansible.builtin.command:
+        cmd: kubectl drain {{ item }} --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
       ignore_errors: true
@@ -255,7 +240,8 @@
       when: cp_to_remove | length > 0
 
     - name: Delete removed worker nodes
-      ansible.builtin.command: kubectl delete node {{ item }}
+      ansible.builtin.command:
+        cmd: kubectl delete node {{ item }}
       register: del_wrk
       until: del_wrk.rc == 0
       retries: 6
@@ -264,7 +250,8 @@
       when: workers_to_remove | length > 0
 
     - name: Delete removed control plane nodes
-      ansible.builtin.command: kubectl delete node {{ item }}
+      ansible.builtin.command:
+        cmd: kubectl delete node {{ item }}
       register: del_cp
       until: del_cp.rc == 0
       retries: 6
