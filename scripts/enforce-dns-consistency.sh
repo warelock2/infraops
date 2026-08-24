@@ -11,7 +11,11 @@
 #   - Managed hostname with no override → create via existing add workflow
 #   - Managed hostname with multiple entries → keep the in-pool one, delete extras
 #   - Managed hostname with only out-of-pool entries → warn, touch nothing
-#   - Non-managed entries matching IaC naming pattern → leave alone (conservative)
+#   - In-pool entry whose host is NOT managed (removed from SSOT) → delete
+#     (Terraform's dns_alloc deliberately has no destroy provisioner — see
+#     main.tf — so this sweep is the owner of teardown-side DNS cleanup)
+#   - k8s-<cluster>-api entry whose cluster no longer exists → delete
+#   - Anything else (foreign names, out-of-pool IPs) → never touched
 #
 # Any changes trigger a pfSense DNS resolver apply.
 # ===========================================================================
@@ -158,6 +162,57 @@ for HOSTNAME in $MANAGED_HOSTS; do
       "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_override" >/dev/null || { echo "ERROR: failed to recreate override for $HNAME.$DOMAIN at $KEEP_IP" >&2; exit 1; }
     DIRTY=1
   fi
+done
+
+# ---------------------------------------------------------------------------
+# Orphan sweep — the teardown side of reconciliation.
+#
+# dns_alloc intentionally carries no destroy provisioner (a destroy-time
+# DELETE would free the IP during replace cycles and shuffle allocations;
+# see main.tf). Instead this enforcer owns orphan cleanup: an override is
+# ours to remove only when BOTH hold:
+#   - it points into the IaC pool (the address space Terraform allocates), AND
+#   - its host is no longer managed by the SSOT, OR it is a k8s-<cluster>-api
+#     record whose cluster no longer exists (API entries live outside the
+#     pool by design)
+# Everything else — firewall, forgejo, out-of-pool records of managed hosts —
+# is never touched. Deletion uses the same proven host+domain query-param
+# DELETE as delete-host.yaml; resolver apply happens once at the end.
+# ---------------------------------------------------------------------------
+echo "=== Sweeping orphaned overrides ==="
+
+# Cluster names that still exist in the SSOT (for the api-entry check)
+EXISTING_CLUSTERS=" $(yq -r '.clusters[].name' "$INFRA" | tr '\n' ' ') "
+
+ORPHANS=""
+for ROW in $(echo "$OVERRIDES_JSON" | jq -r '.data[] | "\(.host)|\(.domain)|\(.ip[0] // "")"' 2>/dev/null); do
+  OH=${ROW%%|*}; REST=${ROW#*|}; OD=${REST%%|*}; OIP=${REST##*|}
+  [ "$OD" = "$DNS_DOMAIN" ] || continue
+
+  case " $MANAGED_HOSTS " in *" $OH "*) continue ;; esac
+
+  if [ -n "$OIP" ] && ip_in_pool "$OIP"; then
+    echo "ORPHAN: $OH.$DOMAIN -> $OIP is in-pool but unmanaged — will delete"
+    ORPHANS="$ORPHANS $OH"
+    continue
+  fi
+
+  # k8s-<cluster>-api lives outside the pool; sweep only when its cluster is gone
+  case "$OH" in
+    k8s-*-api)
+      CL="${OH#k8s-}"; CL="${CL%-api}"
+      case "$EXISTING_CLUSTERS" in *" $CL "*) continue ;; esac
+      echo "ORPHAN: $OH.$DOMAIN belongs to removed cluster '$CL' — will delete"
+      ORPHANS="$ORPHANS $OH"
+      ;;
+  esac
+done
+
+for OH in $ORPHANS; do
+  curl -k -sS -X DELETE -H "x-api-key: $PFSENSE_API_KEY" \
+    "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_overrides?host=$OH&domain=$DNS_DOMAIN" >/dev/null || { echo "ERROR: failed to delete orphaned override for $OH.$DNS_DOMAIN" >&2; exit 1; }
+  echo "DELETED ORPHAN: $OH.$DNS_DOMAIN"
+  DIRTY=1
 done
 
 if [ "$DIRTY" -eq 1 ]; then
