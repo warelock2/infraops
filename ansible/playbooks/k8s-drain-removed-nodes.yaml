@@ -115,23 +115,41 @@
       ansible.builtin.shell:
         cmd: |
           set -e
-          MEMBER_ID=$(kubectl exec -n kube-system etcd-{{ healthy_cp }} -- \
-            etcdctl --endpoints=https://127.0.0.1:2379 \
-            --cacert /etc/kubernetes/pki/etcd/ca.crt \
-            --cert /etc/kubernetes/pki/etcd/server.crt \
-            --key /etc/kubernetes/pki/etcd/server.key \
-            member list -w json | python3 -c "import sys,json; m=[x for x in json.load(sys.stdin)['members'] if x['name']=='{{ item }}']; print(format(m[0]['ID'], 'x') if m else '')")
+          # Fetching the member list can transiently fail ("error: unexpected
+          # EOF") right after a sibling member removal: the surviving etcd
+          # cluster is re-electing/reconfiguring while the departing nodes'
+          # apiservers are still behind the LB, so streams through the API
+          # server can drop. Retry until the fetch yields parseable output.
+          # Prints the member ID in hex, or ABSENT when the member is already
+          # gone (idempotent re-runs must not stall on the retry window).
+          OUT=""
+          for _ in 1 2 3 4 5; do
+            OUT=$(kubectl exec -n kube-system etcd-{{ healthy_cp }} -- \
+              etcdctl --endpoints=https://127.0.0.1:2379 \
+              --cacert /etc/kubernetes/pki/etcd/ca.crt \
+              --cert /etc/kubernetes/pki/etcd/server.crt \
+              --key /etc/kubernetes/pki/etcd/server.key \
+              member list -w json 2>/dev/null | python3 -c "import sys,json; m=[x for x in json.load(sys.stdin)['members'] if x['name']=='{{ item }}']; print(format(m[0]['ID'], 'x') if m else 'ABSENT')" 2>/dev/null) && [ -n "$OUT" ] && break
+            sleep 5
+          done
+          if [ "$OUT" = "ABSENT" ]; then
+            echo "{{ item }}: no such etcd member - already removed"
+            exit 0
+          fi
           # etcdctl -w json yields the ID as a number; member remove parses HEX
           # only — passing decimal digits makes ParseUint(…,16) overflow and
           # abort the drain step (seen live as "bad member ID arg … value out
           # of range"). format(..., 'x') emits the canonical lowercase hex.
-          if [ -n "$MEMBER_ID" ]; then
+          if [ -n "$OUT" ]; then
             kubectl exec -n kube-system etcd-{{ healthy_cp }} -- \
               etcdctl --endpoints=https://127.0.0.1:2379 \
               --cacert /etc/kubernetes/pki/etcd/ca.crt \
               --cert /etc/kubernetes/pki/etcd/server.crt \
               --key /etc/kubernetes/pki/etcd/server.key \
-              member remove "$MEMBER_ID"
+              member remove "$OUT"
+          else
+            echo "ERROR: could not fetch etcd member list after 5 attempts" >&2
+            exit 1
           fi
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
