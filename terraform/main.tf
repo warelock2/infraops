@@ -312,6 +312,12 @@ data "external" "dns_lookup" {
 #   - ignore_changes = [initialization] stops Terraform from diffing the
 #     cloud-init config on every run. Once a VM exists, its cloud-init data
 #     is "baked in" and must not trigger perpetual diffs.
+#   - ignore_changes = [started] keeps Terraform blind to power state after
+#     creation: new VMs still boot (the default applies at create time and
+#     the readiness gate depends on it), but scripts/reconcile-standby-nodes.sh
+#     becomes the sole owner of power state. Without this, every parked
+#     standby shows as drift (false -> true) and apply needlessly boots the
+#     whole standby pool on any push.
 #
 # initialization is the cloud-init block: static IP + DNS + SSH user/key +
 # a vendor data file (the readiness snippet). This is what makes each cloned
@@ -343,7 +349,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
       error_message = "VM ID overlap detected: ${join(", ", [for v in local.vm_id_overlap_violations : v.message])}"
     }
 
-    ignore_changes = [initialization, tags]
+    ignore_changes = [initialization, tags, started]
 
     # When dns_alloc is replaced (VM config changed), recreate the VM so
     # cloud-init picks up the fresh IP from dns-lookup.sh. Without this,
@@ -469,6 +475,7 @@ resource "proxmox_virtual_environment_vm" "standalone" {
   # at creation and cleared by scripts/clear-iac-tags.sh once the workflow has
   # fully succeeded; a failed run leaves the tag so the affected VMs are visible
   # in Proxmox. tags is in ignore_changes so Terraform never fights the clear.
+  # started is ignored too: power state belongs to reconcile-standby-nodes.sh.
   tags = ["iac"]
 
   lifecycle {
@@ -482,7 +489,7 @@ resource "proxmox_virtual_environment_vm" "standalone" {
       error_message = "VM ID overlap detected: ${join(", ", [for v in local.vm_id_overlap_violations : v.message])}"
     }
 
-    ignore_changes = [initialization, tags]
+    ignore_changes = [initialization, tags, started]
   }
 
   agent {
