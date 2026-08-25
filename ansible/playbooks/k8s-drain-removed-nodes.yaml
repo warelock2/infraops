@@ -28,7 +28,7 @@
   gather_facts: false
   tasks:
     - name: Compute desired node names from infrastructure.yaml
-      ansible.builtin.shell:
+      ansible.builtin.command:
         cmd: |
           python3 << 'PYEOF'
           import yaml
@@ -52,16 +52,18 @@
                       nodes.append(f'{ctype}-{name}-{plane_name}-{i:02d}')
           print(' '.join(nodes))
           PYEOF
-        register: desired_nodes_raw
-        changed_when: false
+        executable: /bin/bash
+      register: desired_nodes_raw
+      changed_when: false
 
     - name: Set desired nodes fact
       ansible.builtin.set_fact:
         desired_nodes: "{{ desired_nodes_raw.stdout.split() }}"
 
     - name: Get current cluster nodes
-      ansible.builtin.shell:
+      ansible.builtin.command:
         cmd: kubectl get nodes -o jsonpath='{.items[*].metadata.name}'
+        executable: /bin/bash
       register: current_nodes_raw
       changed_when: false
       failed_when: false
@@ -157,20 +159,22 @@
     cp_to_remove: "{{ hostvars['localhost']['cp_to_remove'] }}"
   tasks:
     - name: Strip departing backends from haproxy config
-      ansible.builtin.shell:
+      ansible.builtin.command:
         cmd: |
           if grep -Eq '^[[:space:]]*server {{ item }}([[:space:]]|$)' /etc/haproxy/haproxy.cfg; then
             sudo sed -i -E '/^[[:space:]]*server {{ item }}([[:space:]]|$)/d' /etc/haproxy/haproxy.cfg
             echo changed
           fi
+        executable: /bin/bash
         creates: /etc/haproxy/haproxy.cfg
       loop: "{{ cp_to_remove }}"
       register: haproxy_strip
       changed_when: "'changed' in haproxy_strip.stdout"
 
     - name: Validate and reload haproxy when backends changed
-      ansible.builtin.shell:
+      ansible.builtin.command:
         cmd: sudo haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null && sudo systemctl reload haproxy
+        executable: /bin/bash
       when: haproxy_strip.results | map(attribute='stdout') | select('search', 'changed') | list | length > 0
 
     - name: Wait for the API endpoint to answer on the VIP
@@ -207,7 +211,7 @@
       ignore_errors: true
 
     - name: Remove etcd members for removed control planes
-      ansible.builtin.shell:
+      ansible.builtin.command:
         cmd: |
           set -e
           OUT=""
@@ -236,6 +240,7 @@
             echo "ERROR: could not fetch etcd member list after 5 attempts" >&2
             exit 1
           fi
+        executable: /bin/bash
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
 
