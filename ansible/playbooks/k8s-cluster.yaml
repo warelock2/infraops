@@ -66,7 +66,6 @@
     - name: Get default interface
       ansible.builtin.command:
         cmd: "ip route show default | awk 'NR==1{print $5}'"
-        executable: /bin/bash
       register: _default_route
       changed_when: false
 
@@ -301,34 +300,8 @@
       # ready" (Play 6) would otherwise time out silently after 15 minutes on
       # a crash-looping apiserver. Fail fast here, dumping the kubelet +
       # apiserver container logs so the cause is obvious.
-      ansible.builtin.command:
-        cmd: |
-          ready() {
-            kubectl --kubeconfig /etc/kubernetes/admin.conf \
-              --server https://{{ node_ip }}:6444 get --raw /readyz >/dev/null 2>&1
-          }
-          if ready; then
-            echo "local API server healthy"
-            exit 0
-          fi
-          for i in $(seq 1 30); do
-            sleep 10
-            ready && { echo "local API server healthy"; exit 0; }
-          done
-          echo "ERROR: local API server not ready on {{ inventory_hostname }} (https://{{ node_ip }}:6444)" >&2
-          echo "--- kubelet (last 20) ---" >&2
-          journalctl -u kubelet --no-pager -n 20 2>/dev/null | tail -20 >&2
-          echo "--- kube-apiserver container (last 20) ---" >&2
-          if [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ]; then
-            CID=$(crictl ps -a 2>/dev/null | grep kube-apiserver | head -1 | awk '{print $1}')
-            if [ -n "$CID" ]; then
-              crictl logs "$CID" 2>&1 | tail -20 >&2
-            else
-              echo "(kube-apiserver static pod container not present)" >&2
-            fi
-          fi
-          exit 1
-        executable: /bin/bash
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/scripts/wait-local-apiserver.sh {{ node_ip }} {{ inventory_hostname }}"
       changed_when: false
       when: inventory_hostname != cp_leader
 
@@ -397,16 +370,12 @@
 
     - name: Enable WireGuard in Calico manifest
       ansible.builtin.command:
-        cmd: >
-          sed -i '/CALICO_IPV6POOL_CIDR/a\
-            - name: WIREGUARD_ENABLED\n              value: "true"' /tmp/calico.yaml
-        executable: /bin/bash
+        cmd: sed -i '/CALICO_IPV6POOL_CIDR/a\            - name: WIREGUARD_ENABLED\n              value: "true"' /tmp/calico.yaml
       when: inventory_hostname == cp_leader
 
     - name: Install Calico CNI
       ansible.builtin.command:
         cmd: kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f /tmp/calico.yaml
-        executable: /bin/bash
       changed_when: true
       when: inventory_hostname == cp_leader
 
@@ -456,7 +425,6 @@
     - name: Join the cluster
       ansible.builtin.command:
         cmd: "{{ k8s_join_command }}"
-        executable: /bin/bash
       changed_when: true
       when: not k8s_kubelet_conf.stat.exists
 
@@ -469,13 +437,20 @@
         mode: "0700"
 
     - name: "Copy admin kubeconfig from control plane to {{ infra_admin_user }} user"
-      ansible.builtin.command:
-        cmd: |
-          mkdir -p "/home/{{ infra_admin_user }}/.kube"
-          echo '{{ hostvars[(groups['k8s_control'] | sort)[0]]['k8s_admin_kubeconfig'] | b64encode }}' | base64 -d > "/home/{{ infra_admin_user }}/.kube/config"
-          chown "{{ infra_admin_user }}:{{ infra_admin_group }}" "/home/{{ infra_admin_user }}/.kube/config"
-          chmod 0600 "/home/{{ infra_admin_user }}/.kube/config"
-        executable: /bin/bash
+      ansible.builtin.file:
+        path: "/home/{{ infra_admin_user }}/.kube"
+        state: directory
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+        mode: "0700"
+
+    - name: "Write kubeconfig for {{ infra_admin_user }} user"
+      ansible.builtin.copy:
+        dest: "/home/{{ infra_admin_user }}/.kube/config"
+        content: "{{ hostvars[(groups['k8s_control'] | sort)[0]]['k8s_admin_kubeconfig'] }}"
+        owner: "{{ infra_admin_user }}"
+        group: "{{ infra_admin_group }}"
+        mode: "0600"
 
 # ---------------------------------------------------------------------------
 # Play 6 — RBAC.
@@ -493,11 +468,7 @@
   tasks:
     - name: Wait for all nodes ready
       ansible.builtin.command:
-        cmd: >
-          kubectl wait --for=condition=Ready nodes --all
-          --timeout=900s
-          --kubeconfig /etc/kubernetes/admin.conf
-        executable: /bin/bash
+        cmd: kubectl wait --for=condition=Ready nodes --all --timeout=900s --kubeconfig /etc/kubernetes/admin.conf
       changed_when: false
 
     - name: Create ClusterRoleBinding for k8s-admins (legacy)

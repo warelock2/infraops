@@ -139,7 +139,6 @@
           -out "{{ kc_project_dir }}/certs/tls.crt"
           -subj "/CN={{ kc_domain }}"
           -addext "subjectAltName=DNS:{{ kc_domain }}"
-        executable: /bin/bash
       creates: "{{ kc_project_dir }}/certs/tls.crt"
 
     - name: Set certificate file permissions and ownership
@@ -181,7 +180,6 @@
       ansible.builtin.command:
         cmd: docker compose up -d
         chdir: "{{ kc_project_dir }}"
-        executable: /bin/bash
       register: compose_result
       changed_when: compose_result.stdout is search('Started|Created|Starting')
 

@@ -54,13 +54,8 @@
     update_cache: true
 
 - name: Configure containerd with SystemdCgroup
-  ansible.builtin.command:
-    cmd: >
-      mkdir -p /etc/containerd &&
-      containerd config default > /etc/containerd/config.toml &&
-      sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml &&
-      sed -i 's|sandbox_image = .*|sandbox_image = "{{ k8s_image_repository }}/pause:3.10"|' /etc/containerd/config.toml
-    executable: /bin/bash
+  ansible.builtin.script:
+    cmd: "{{ playbook_dir }}/scripts/configure-containerd.sh"
   args:
     creates: /etc/containerd/config.toml
 
@@ -75,12 +70,8 @@
     k8s_major_minor: "{{ k8s_version | regex_replace('^(\\d+\\.\\d+)\\..*$', '\\1') }}"
 
 - name: Add k8s apt key
-  ansible.builtin.command:
-    cmd: >
-      mkdir -p /etc/apt/keyrings &&
-      curl -fsSL https://pkgs.k8s.io/core:/stable:/v{{ k8s_major_minor }}/deb/Release.key
-      | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-    executable: /bin/bash
+  ansible.builtin.script:
+    cmd: "{{ playbook_dir }}/scripts/add-k8s-apt-key.sh {{ k8s_major_minor }}"
   args:
     creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 

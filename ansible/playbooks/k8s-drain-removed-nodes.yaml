@@ -28,31 +28,8 @@
   gather_facts: false
   tasks:
     - name: Compute desired node names from infrastructure.yaml
-      ansible.builtin.command:
-        cmd: |
-          python3 << 'PYEOF'
-          import yaml
-          with open('{{ playbook_dir }}/../../conf/infrastructure.yaml') as f:
-              infra = yaml.safe_load(f)
-          nodes = []
-          defaults = infra.get('defaults', {})
-          cluster_type = defaults.get('cluster_type', 'k8s')
-          planes = defaults.get('planes', {})
-          for cluster in infra.get('clusters', []):
-              enforcement = cluster.get('enforcement', [])
-              if 'infrastructure_provisioning' not in enforcement:
-                  continue
-              ctype = cluster.get('cluster_type', cluster_type)
-              name = cluster['name']
-              for plane_key in ['control_plane', 'workers']:
-                  plane_cfg = cluster.get(plane_key, {})
-                  count = plane_cfg.get('nodes', 0)
-                  plane_name = planes.get(plane_key, {}).get('plane_name', plane_key.replace('_', '-'))
-                  for i in range(1, count + 1):
-                      nodes.append(f'{ctype}-{name}-{plane_name}-{i:02d}')
-          print(' '.join(nodes))
-          PYEOF
-        executable: /bin/bash
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/scripts/compute-desired-nodes.py {{ playbook_dir }}"
       register: desired_nodes_raw
       changed_when: false
 
@@ -63,7 +40,6 @@
     - name: Get current cluster nodes
       ansible.builtin.command:
         cmd: kubectl get nodes -o jsonpath='{.items[*].metadata.name}'
-        executable: /bin/bash
       register: current_nodes_raw
       changed_when: false
       failed_when: false
@@ -159,13 +135,9 @@
     cp_to_remove: "{{ hostvars['localhost']['cp_to_remove'] }}"
   tasks:
     - name: Strip departing backends from haproxy config
-      ansible.builtin.command:
-        cmd: |
-          if grep -Eq '^[[:space:]]*server {{ item }}([[:space:]]|$)' /etc/haproxy/haproxy.cfg; then
-            sudo sed -i -E '/^[[:space:]]*server {{ item }}([[:space:]]|$)/d' /etc/haproxy/haproxy.cfg
-            echo changed
-          fi
-        executable: /bin/bash
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/scripts/strip-haproxy-backend.sh {{ item }}"
+      args:
         creates: /etc/haproxy/haproxy.cfg
       loop: "{{ cp_to_remove }}"
       register: haproxy_strip
@@ -173,8 +145,7 @@
 
     - name: Validate and reload haproxy when backends changed
       ansible.builtin.command:
-        cmd: sudo haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null && sudo systemctl reload haproxy
-        executable: /bin/bash
+        cmd: sudo sh -c 'haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null && systemctl reload haproxy'
       when: haproxy_strip.results | map(attribute='stdout') | select('search', 'changed') | list | length > 0
 
     - name: Wait for the API endpoint to answer on the VIP
@@ -211,36 +182,8 @@
       ignore_errors: true
 
     - name: Remove etcd members for removed control planes
-      ansible.builtin.command:
-        cmd: |
-          set -e
-          OUT=""
-          for _ in 1 2 3 4 5; do
-            OUT=$(kubectl exec -n kube-system etcd-{{ healthy_cp }} -- \
-              etcdctl --endpoints=https://127.0.0.1:2379 \
-              --cacert /etc/kubernetes/pki/etcd/ca.crt \
-              --cert /etc/kubernetes/pki/etcd/server.crt \
-              --key /etc/kubernetes/pki/etcd/server.key \
-              member list -w json 2>/dev/null | \
-              python3 -c "import sys,json; m=[x for x in json.load(sys.stdin)['members'] if x['name']=='{{ item }}']; print(format(m[0]['ID'],'x') if m else 'ABSENT')" 2>/dev/null) && [ -n "$OUT" ] && break
-            sleep 5
-          done
-          if [ "$OUT" = "ABSENT" ]; then
-            echo "{{ item }}: no such etcd member - already removed"
-            exit 0
-          fi
-          if [ -n "$OUT" ]; then
-            kubectl exec -n kube-system etcd-{{ healthy_cp }} -- \
-              etcdctl --endpoints=https://127.0.0.1:2379 \
-              --cacert /etc/kubernetes/pki/etcd/ca.crt \
-              --cert /etc/kubernetes/pki/etcd/server.crt \
-              --key /etc/kubernetes/pki/etcd/server.key \
-              member remove "$OUT"
-          else
-            echo "ERROR: could not fetch etcd member list after 5 attempts" >&2
-            exit 1
-          fi
-        executable: /bin/bash
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/scripts/remove-etcd-member.sh {{ item }} {{ healthy_cp }}"
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
 
