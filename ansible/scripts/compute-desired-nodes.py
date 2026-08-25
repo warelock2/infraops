@@ -2,9 +2,12 @@
 """Compute desired k8s node names from infrastructure.yaml"""
 import sys
 import yaml
+import os
 
 playbook_dir = sys.argv[1] if len(sys.argv) > 1 else '.'
-with open(f'{playbook_dir}/conf/infrastructure.yaml') as f:
+# infrastructure.yaml is at project root (../../conf/infrastructure.yaml from playbook_dir)
+infra_path = os.path.join(playbook_dir, '..', '..', 'conf', 'infrastructure.yaml')
+with open(infra_path) as f:
     infra = yaml.safe_load(f)
 
 nodes = []
