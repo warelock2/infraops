@@ -55,7 +55,7 @@
 
 - name: Configure containerd with SystemdCgroup
   ansible.builtin.script:
-    cmd: "{{ playbook_dir }}/scripts/configure-containerd.sh"
+    cmd: "{{ playbook_dir }}/../scripts/configure-containerd.sh"
   args:
     creates: /etc/containerd/config.toml
 
@@ -71,7 +71,7 @@
 
 - name: Add k8s apt key
   ansible.builtin.script:
-    cmd: "{{ playbook_dir }}/scripts/add-k8s-apt-key.sh {{ k8s_major_minor }}"
+    cmd: "{{ playbook_dir }}/../scripts/add-k8s-apt-key.sh {{ k8s_major_minor }}"
   args:
     creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 

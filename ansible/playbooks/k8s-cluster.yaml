@@ -301,7 +301,7 @@
       # a crash-looping apiserver. Fail fast here, dumping the kubelet +
       # apiserver container logs so the cause is obvious.
       ansible.builtin.script:
-        cmd: "{{ playbook_dir }}/scripts/wait-local-apiserver.sh {{ node_ip }} {{ inventory_hostname }}"
+        cmd: "{{ playbook_dir }}/../scripts/wait-local-apiserver.sh {{ node_ip }} {{ inventory_hostname }}"
       changed_when: false
       when: inventory_hostname != cp_leader
 

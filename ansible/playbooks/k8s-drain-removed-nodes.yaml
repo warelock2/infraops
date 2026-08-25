@@ -29,7 +29,7 @@
   tasks:
     - name: Compute desired node names from infrastructure.yaml
       ansible.builtin.script:
-        cmd: "{{ playbook_dir }}/scripts/compute-desired-nodes.py {{ playbook_dir }}"
+        cmd: "{{ playbook_dir }}/../scripts/compute-desired-nodes.py {{ playbook_dir }}"
       register: desired_nodes_raw
       changed_when: false
 
@@ -136,7 +136,7 @@
   tasks:
     - name: Strip departing backends from haproxy config
       ansible.builtin.script:
-        cmd: "{{ playbook_dir }}/scripts/strip-haproxy-backend.sh {{ item }}"
+        cmd: "{{ playbook_dir }}/../scripts/strip-haproxy-backend.sh {{ item }}"
       args:
         creates: /etc/haproxy/haproxy.cfg
       loop: "{{ cp_to_remove }}"
@@ -183,7 +183,7 @@
 
     - name: Remove etcd members for removed control planes
       ansible.builtin.script:
-        cmd: "{{ playbook_dir }}/scripts/remove-etcd-member.sh {{ item }} {{ healthy_cp }}"
+        cmd: "{{ playbook_dir }}/../scripts/remove-etcd-member.sh {{ item }} {{ healthy_cp }}"
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
 
