@@ -69,13 +69,9 @@ is_pool_ip() {
 
 IP=$(find_pool_ip || true)
 if [ -z "$IP" ]; then
-  RESULT_FILE=$(mktemp /tmp/terraform-dns-ip.XXXXXX)
-  trap 'rm -f "$RESULT_FILE"' EXIT
-  ansible-playbook "$BASE/ansible/playbooks/manage-iac-dns.yaml" \
-    -e "workflow=add:$FQDN" \
-    -e "dns_result_file=$RESULT_FILE" \
-    > /tmp/terraform-dns-alloc.log 2>&1
-  IP=$(awk 'NF {ip=$0} END {print ip}' "$RESULT_FILE")
+  ANSIBLE_OUTPUT=$(ansible-playbook "$BASE/ansible/playbooks/manage-iac-dns.yaml" \
+    -e "workflow=add:$FQDN" 2>&1 | tee /tmp/terraform-dns-alloc.log)
+  IP=$(printf '%s\n' "$ANSIBLE_OUTPUT" | awk -F= '/DNS_ALLOCATED_IP=/ {ip=$2} END {gsub(/[^0-9.].*/, "", ip); print ip}')
   if ! is_pool_ip "$IP"; then
     printf '%s\n' "DNS allocation for $HOST returned an invalid pool address" >&2
     exit 1
