@@ -254,10 +254,12 @@ locals {
 # ---------------------------------------------------------------------------
 data "external" "dns_alloc" {
   for_each = local.vms
-  program  = ["sh", "${path.root}/../scripts/dns-allocate.sh", each.key, local.dns_ip_pool.start, local.dns_ip_pool.end]
+  program = ["sh", "${path.root}/../scripts/dns-allocate.sh"]
 
   query = {
-    name = each.key
+    name       = each.key
+    pool_start = local.dns_ip_pool.start
+    pool_end   = local.dns_ip_pool.end
   }
 }
 
@@ -387,10 +389,12 @@ resource "proxmox_virtual_environment_vm" "vm" {
 # cloud-init, avoiding a second resolver lookup.
 data "external" "standalone_dns_alloc" {
   for_each = local.standalone_hosts_provision
-  program  = ["sh", "${path.root}/../scripts/dns-allocate.sh", each.key, local.dns_ip_pool.start, local.dns_ip_pool.end]
+  program = ["sh", "${path.root}/../scripts/dns-allocate.sh"]
 
   query = {
-    name = each.key
+    name       = each.key
+    pool_start = local.dns_ip_pool.start
+    pool_end   = local.dns_ip_pool.end
   }
 }
 

@@ -1,9 +1,10 @@
 #!/bin/sh
 set -eu
 
-HOST="$1"
-POOL_START="$2"
-POOL_END="$3"
+INPUT=$(cat)
+HOST=$(printf '%s' "$INPUT" | jq -r '.name')
+POOL_START=$(printf '%s' "$INPUT" | jq -r '.pool_start')
+POOL_END=$(printf '%s' "$INPUT" | jq -r '.pool_end')
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 BASE=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 INFRA="$BASE/conf/infrastructure.yaml"
