@@ -29,23 +29,29 @@ START_OCTET=$(printf '%s' "$POOL_START" | cut -d. -f4)
 END_OCTET=$(printf '%s' "$POOL_END" | cut -d. -f4)
 
 find_pool_ip() {
-  for CANDIDATE in $(curl -k -sS -f -H "x-api-key: $PFSENSE_API_KEY" \
-    "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_overrides" |
-    jq -r --arg h "$NAME" --arg d "$FQDN_DOMAIN" \
-      '.data[] | select(.host == $h and .domain == $d) | .ip[0]'); do
-    CANDIDATE_PREFIX=$(printf '%s' "$CANDIDATE" | cut -d. -f1-3)
-    CANDIDATE_OCTET=$(printf '%s' "$CANDIDATE" | cut -d. -f4)
-    case "$CANDIDATE_PREFIX" in
-      "$POOL_PREFIX") ;;
-      *) continue ;;
-    esac
-    case "$CANDIDATE_OCTET" in
-      ''|*[!0-9]*) continue ;;
-    esac
-    if [ "$CANDIDATE_OCTET" -ge "$START_OCTET" ] && [ "$CANDIDATE_OCTET" -le "$END_OCTET" ]; then
-      printf '%s\n' "$CANDIDATE"
-      return 0
-    fi
+  ATTEMPT=1
+  while [ "$ATTEMPT" -le 3 ]; do
+    RESPONSE=$(curl -k -sS -f -H "x-api-key: $PFSENSE_API_KEY" \
+      "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_overrides" 2>/dev/null || true)
+    for CANDIDATE in $(printf '%s' "$RESPONSE" |
+      jq -r --arg h "$NAME" --arg d "$FQDN_DOMAIN" \
+        '.data[]? | select(.host == $h and .domain == $d) | .ip[0]' 2>/dev/null); do
+      CANDIDATE_PREFIX=$(printf '%s' "$CANDIDATE" | cut -d. -f1-3)
+      CANDIDATE_OCTET=$(printf '%s' "$CANDIDATE" | cut -d. -f4)
+      case "$CANDIDATE_PREFIX" in
+        "$POOL_PREFIX") ;;
+        *) continue ;;
+      esac
+      case "$CANDIDATE_OCTET" in
+        ''|*[!0-9]*) continue ;;
+      esac
+      if [ "$CANDIDATE_OCTET" -ge "$START_OCTET" ] && [ "$CANDIDATE_OCTET" -le "$END_OCTET" ]; then
+        printf '%s\n' "$CANDIDATE"
+        return 0
+      fi
+    done
+    sleep 2
+    ATTEMPT=$((ATTEMPT + 1))
   done
 }
 
