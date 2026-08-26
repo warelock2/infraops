@@ -5,6 +5,8 @@ INPUT=$(cat)
 HOST=$(printf '%s' "$INPUT" | jq -r '.name')
 POOL_START=$(printf '%s' "$INPUT" | jq -r '.pool_start')
 POOL_END=$(printf '%s' "$INPUT" | jq -r '.pool_end')
+exec 9>/tmp/terraform-dns-alloc.lock
+flock -x 9
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 BASE=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 INFRA="$BASE/conf/infrastructure.yaml"
@@ -26,21 +28,22 @@ PFSENSE_HOST=$(yq -r '[.hosts[] | select(.services? != null) | select(.services[
 PFSENSE_API_KEY=$(vault kv get -format=json secret/infraops/pfsense | jq -r '.data.data.api_key')
 NAME="${FQDN%%.*}"
 FQDN_DOMAIN="${FQDN#*.}"
+START=$(printf '%s' "$POOL_START" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
+END=$(printf '%s' "$POOL_END" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
 
-IP=$(curl -k -sS -f -H "x-api-key: $PFSENSE_API_KEY" \
+IP=""
+for CANDIDATE in $(curl -k -sS -f -H "x-api-key: $PFSENSE_API_KEY" \
   "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_overrides" |
   jq -r --arg h "$NAME" --arg d "$FQDN_DOMAIN" \
-    '.data[] | select(.host == $h and .domain == $d) | .ip[0]' | head -1)
+    '.data[] | select(.host == $h and .domain == $d) | .ip[0]'); do
+  VALUE=$(printf '%s' "$CANDIDATE" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
+  if [ "$VALUE" -ge "$START" ] && [ "$VALUE" -le "$END" ]; then
+    IP="$CANDIDATE"
+    break
+  fi
+done
 
-if [ -z "$IP" ] || [ "$IP" = "null" ]; then
-  printf '%s\n' "DNS allocation for $FQDN was not found in pfSense overrides" >&2
-  exit 1
-fi
-
-START=$(echo "$POOL_START" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
-END=$(echo "$POOL_END" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
-VALUE=$(echo "$IP" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
-if [ -z "$IP" ] || [ "$VALUE" -lt "$START" ] || [ "$VALUE" -gt "$END" ]; then
+if [ -z "$IP" ]; then
   printf '%s\n' "DNS allocation for $HOST did not produce an in-pool address" >&2
   exit 1
 fi
