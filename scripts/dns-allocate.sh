@@ -56,15 +56,38 @@ find_pool_ip() {
   done
 }
 
+is_pool_ip() {
+  CANDIDATE="$1"
+  CANDIDATE_PREFIX=$(printf '%s' "$CANDIDATE" | cut -d. -f1-3)
+  CANDIDATE_OCTET=$(printf '%s' "$CANDIDATE" | cut -d. -f4)
+  [ "$CANDIDATE_PREFIX" = "$POOL_PREFIX" ] || return 1
+  case "$CANDIDATE_OCTET" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  [ "$CANDIDATE_OCTET" -ge "$START_OCTET" ] && [ "$CANDIDATE_OCTET" -le "$END_OCTET" ]
+}
+
 IP=$(find_pool_ip || true)
 if [ -z "$IP" ]; then
+  RESULT_FILE=$(mktemp /tmp/terraform-dns-ip.XXXXXX)
+  trap 'rm -f "$RESULT_FILE"' EXIT
   ansible-playbook "$BASE/ansible/playbooks/manage-iac-dns.yaml" \
     -e "workflow=add:$FQDN" \
+    -e "dns_result_file=$RESULT_FILE" \
     > /tmp/terraform-dns-alloc.log 2>&1
-  IP=$(find_pool_ip || true)
+  IP=$(awk 'NF {ip=$0} END {print ip}' "$RESULT_FILE")
+  if ! is_pool_ip "$IP"; then
+    printf '%s\n' "DNS allocation for $HOST returned an invalid pool address" >&2
+    exit 1
+  fi
+  AUTHORITATIVE_IP=$(find_pool_ip || true)
+  if [ "$AUTHORITATIVE_IP" != "$IP" ]; then
+    printf '%s\n' "DNS allocation for $HOST was not confirmed by pfSense" >&2
+    exit 1
+  fi
 fi
 
-if [ -z "$IP" ]; then
+if [ -z "$IP" ] || ! is_pool_ip "$IP"; then
   printf '%s\n' "DNS allocation for $HOST did not produce an in-pool address" >&2
   exit 1
 fi
