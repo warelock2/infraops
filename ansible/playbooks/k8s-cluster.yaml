@@ -64,7 +64,7 @@
       changed_when: false
 
     - name: Get default interface
-      ansible.builtin.command:
+      ansible.builtin.shell:
         cmd: "ip route show default | awk 'NR==1{print $5}'"
       register: _default_route
       changed_when: false
