@@ -28,16 +28,25 @@ PFSENSE_HOST=$(yq -r '[.hosts[] | select(.services? != null) | select(.services[
 PFSENSE_API_KEY=$(vault kv get -format=json secret/infraops/pfsense | jq -r '.data.data.api_key')
 NAME="${FQDN%%.*}"
 FQDN_DOMAIN="${FQDN#*.}"
-START=$(printf '%s' "$POOL_START" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
-END=$(printf '%s' "$POOL_END" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
+POOL_PREFIX=$(printf '%s' "$POOL_START" | cut -d. -f1-3)
+START_OCTET=$(printf '%s' "$POOL_START" | cut -d. -f4)
+END_OCTET=$(printf '%s' "$POOL_END" | cut -d. -f4)
 
 IP=""
 for CANDIDATE in $(curl -k -sS -f -H "x-api-key: $PFSENSE_API_KEY" \
   "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_overrides" |
   jq -r --arg h "$NAME" --arg d "$FQDN_DOMAIN" \
     '.data[] | select(.host == $h and .domain == $d) | .ip[0]'); do
-  VALUE=$(printf '%s' "$CANDIDATE" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
-  if [ "$VALUE" -ge "$START" ] && [ "$VALUE" -le "$END" ]; then
+  CANDIDATE_PREFIX=$(printf '%s' "$CANDIDATE" | cut -d. -f1-3)
+  CANDIDATE_OCTET=$(printf '%s' "$CANDIDATE" | cut -d. -f4)
+  case "$CANDIDATE_PREFIX" in
+    "$POOL_PREFIX") ;;
+    *) continue ;;
+  esac
+  case "$CANDIDATE_OCTET" in
+    ''|*[!0-9]*) continue ;;
+  esac
+  if [ "$CANDIDATE_OCTET" -ge "$START_OCTET" ] && [ "$CANDIDATE_OCTET" -le "$END_OCTET" ]; then
     IP="$CANDIDATE"
     break
   fi
