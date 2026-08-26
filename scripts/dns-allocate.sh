@@ -31,7 +31,8 @@ END_OCTET=$(printf '%s' "$POOL_END" | cut -d. -f4)
 find_pool_ip() {
   ATTEMPT=1
   while [ "$ATTEMPT" -le 3 ]; do
-    RESPONSE=$(curl -k -sS -f -H "x-api-key: $PFSENSE_API_KEY" \
+    RESPONSE=$(curl -k -sS -f --retry 5 --retry-all-errors --retry-delay 2 \
+      -H "x-api-key: $PFSENSE_API_KEY" \
       "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_overrides" 2>/dev/null || true)
     for CANDIDATE in $(printf '%s' "$RESPONSE" |
       jq -r --arg h "$NAME" --arg d "$FQDN_DOMAIN" \
