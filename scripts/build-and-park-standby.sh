@@ -75,31 +75,35 @@ chmod 600 /tmp/ansible_key
 echo "=== Generating standby inventory ==="
 python3 scripts/generate-inventory.py --standby --output ansible/inventory-standby.json
 
-export ANSIBLE_CONFIG=$PWD/ansible/ansible.cfg
+export ANSIBLE_CONFIG="$PWD/ansible/ansible.cfg"
 SERVICE_HOST=$(yq .defaults.service_host conf/infrastructure.yaml)
 DNS_DOMAIN=$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml)
 SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}"
-GIT_COMMIT="${GITHUB_SHA::8}"
+GIT_COMMIT=$(printf '%s' "$GITHUB_SHA" | cut -c1-8)
 GIT_TAG="${GITHUB_REF_NAME}"
 echo "=== Reading NTfy channel from Vault ==="
 NTFY_CHANNEL=$(vault kv get -field=message_channel_phone secret/infraops/ntfy)
 
-EXTRA_VARS=" \
-  -e infra_platform_kubernetes_version=$(yq .tools.kubernetes conf/infrastructure.yaml) \
-  -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr conf/infrastructure.yaml) \
-  -e infra_platform_kubernetes_calico_version=$(yq .tools.calico conf/infrastructure.yaml) \
-  -e infra_service_domain=$SERVICE_DOMAIN \
-  -e infra_admin_user=$(yq .platform.admin.user conf/infrastructure.yaml) \
-  -e infra_admin_group=$(yq .platform.admin.group conf/infrastructure.yaml) \
-  -e infra_ssh_key_file=/tmp/ssh_key.pub \
-  -e git_commit=$GIT_COMMIT \
-  -e git_tag=$GIT_TAG \
-  -e ntfy_message_channel=$NTFY_CHANNEL"
+KUBERNETES_VERSION=$(yq .tools.kubernetes conf/infrastructure.yaml)
+POD_NETWORK_CIDR=$(yq .platform.kubernetes.pod_network_cidr conf/infrastructure.yaml)
+CALICO_VERSION=$(yq .tools.calico conf/infrastructure.yaml)
+ADMIN_USER=$(yq .platform.admin.user conf/infrastructure.yaml)
+ADMIN_GROUP=$(yq .platform.admin.group conf/infrastructure.yaml)
 
 echo "=== Building standby VMs (common baseline + k8s base) ==="
 ANSIBLE_LOG=/tmp/standby-build-output.log
 ansible-playbook -i ansible/inventory-standby.json ansible/playbooks/common.yaml \
-  --limit "$RUNNING_NAMES" --private-key /tmp/ansible_key $EXTRA_VARS >"$ANSIBLE_LOG" 2>&1
+  --limit "$RUNNING_NAMES" --private-key /tmp/ansible_key \
+  -e "infra_platform_kubernetes_version=$KUBERNETES_VERSION" \
+  -e "infra_platform_kubernetes_pod_network_cidr=$POD_NETWORK_CIDR" \
+  -e "infra_platform_kubernetes_calico_version=$CALICO_VERSION" \
+  -e "infra_service_domain=$SERVICE_DOMAIN" \
+  -e "infra_admin_user=$ADMIN_USER" \
+  -e "infra_admin_group=$ADMIN_GROUP" \
+  -e infra_ssh_key_file=/tmp/ssh_key.pub \
+  -e "git_commit=$GIT_COMMIT" \
+  -e "git_tag=$GIT_TAG" \
+  -e "ntfy_message_channel=$NTFY_CHANNEL" >"$ANSIBLE_LOG" 2>&1
 STATUS=$?
 cat "$ANSIBLE_LOG"
 if [ "$STATUS" -ne 0 ]; then
@@ -108,7 +112,17 @@ if [ "$STATUS" -ne 0 ]; then
 fi
 
 ansible-playbook -i ansible/inventory-standby.json ansible/playbooks/k8s-standby-build.yaml \
-  --limit "$RUNNING_NAMES" --private-key /tmp/ansible_key $EXTRA_VARS >"$ANSIBLE_LOG" 2>&1
+  --limit "$RUNNING_NAMES" --private-key /tmp/ansible_key \
+  -e "infra_platform_kubernetes_version=$KUBERNETES_VERSION" \
+  -e "infra_platform_kubernetes_pod_network_cidr=$POD_NETWORK_CIDR" \
+  -e "infra_platform_kubernetes_calico_version=$CALICO_VERSION" \
+  -e "infra_service_domain=$SERVICE_DOMAIN" \
+  -e "infra_admin_user=$ADMIN_USER" \
+  -e "infra_admin_group=$ADMIN_GROUP" \
+  -e infra_ssh_key_file=/tmp/ssh_key.pub \
+  -e "git_commit=$GIT_COMMIT" \
+  -e "git_tag=$GIT_TAG" \
+  -e "ntfy_message_channel=$NTFY_CHANNEL" >"$ANSIBLE_LOG" 2>&1
 STATUS=$?
 cat "$ANSIBLE_LOG"
 if [ "$STATUS" -ne 0 ]; then

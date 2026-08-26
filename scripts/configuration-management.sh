@@ -53,10 +53,10 @@ if [ "$(yq '.clusters | length' conf/infrastructure.yaml)" -gt 0 ]; then
   CP01=$(yq -r '.clusters[0].name' conf/infrastructure.yaml)
   CP_FQDN=k8s-${CP01}-control-01.${DNS_DOMAIN}
   if ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=10 -i /tmp/ansible_key ansible@${CP_FQDN} \
+      -o ConnectTimeout=10 -i /tmp/ansible_key "ansible@${CP_FQDN}" \
       'test -f /etc/kubernetes/admin.conf' 2>/dev/null; then
     ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=10 -i /tmp/ansible_key ansible@${CP_FQDN} \
+      -o ConnectTimeout=10 -i /tmp/ansible_key "ansible@${CP_FQDN}" \
       sudo cat /etc/kubernetes/admin.conf > ~/.kube/config
     chmod 600 ~/.kube/config
   else
@@ -67,27 +67,27 @@ else
 fi
 
 echo "=== Running ansible site playbook ==="
-export ANSIBLE_CONFIG=$PWD/ansible/ansible.cfg
+export ANSIBLE_CONFIG="$PWD/ansible/ansible.cfg"
 SERVICE_HOST=$(yq .defaults.service_host conf/infrastructure.yaml)
 DNS_DOMAIN=$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml)
 SERVICE_DOMAIN="${SERVICE_HOST}.${DNS_DOMAIN}"
-GIT_COMMIT="${GITHUB_SHA::8}"
+GIT_COMMIT=$(printf '%s' "$GITHUB_SHA" | cut -c1-8)
 GIT_TAG="${GITHUB_REF_NAME}"
 
 ANSIBLE_LOG=/tmp/ansible-output.log
 : > "$ANSIBLE_LOG"
 ansible-playbook -i ansible/inventory.json ansible/playbooks/site.yaml \
   --private-key /tmp/ansible_key \
-  -e infra_platform_kubernetes_version=$(yq .tools.kubernetes conf/infrastructure.yaml) \
-  -e infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr conf/infrastructure.yaml) \
-  -e infra_platform_kubernetes_calico_version=$(yq .tools.calico conf/infrastructure.yaml) \
-  -e infra_service_domain=$SERVICE_DOMAIN \
-  -e infra_admin_user=$(yq .platform.admin.user conf/infrastructure.yaml) \
-  -e infra_admin_group=$(yq .platform.admin.group conf/infrastructure.yaml) \
+  -e "infra_platform_kubernetes_version=$(yq .tools.kubernetes conf/infrastructure.yaml)" \
+  -e "infra_platform_kubernetes_pod_network_cidr=$(yq .platform.kubernetes.pod_network_cidr conf/infrastructure.yaml)" \
+  -e "infra_platform_kubernetes_calico_version=$(yq .tools.calico conf/infrastructure.yaml)" \
+  -e "infra_service_domain=$SERVICE_DOMAIN" \
+  -e "infra_admin_user=$(yq .platform.admin.user conf/infrastructure.yaml)" \
+  -e "infra_admin_group=$(yq .platform.admin.group conf/infrastructure.yaml)" \
   -e infra_ssh_key_file=/tmp/ssh_key.pub \
-  -e git_commit=$GIT_COMMIT \
-  -e git_tag=$GIT_TAG \
-  -e ntfy_message_channel=$NTFY_CHANNEL >"$ANSIBLE_LOG" 2>&1 &
+  -e "git_commit=$GIT_COMMIT" \
+  -e "git_tag=$GIT_TAG" \
+  -e "ntfy_message_channel=$NTFY_CHANNEL" >"$ANSIBLE_LOG" 2>&1 &
 ANSIBLE_PID=$!
 RUN_START=$(date +%s)
 LAST_HEARTBEAT=$RUN_START
