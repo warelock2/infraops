@@ -370,7 +370,8 @@
 
     - name: Enable WireGuard in Calico manifest
       ansible.builtin.command:
-        cmd: sed -i '/CALICO_IPV6POOL_CIDR/a\            - name: WIREGUARD_ENABLED\n              value: "true"' /tmp/calico.yaml
+        cmd: |
+          sed -i '/CALICO_IPV6POOL_CIDR/a\            - name: WIREGUARD_ENABLED\n              value: "true"' /tmp/calico.yaml
       when: inventory_hostname == cp_leader
 
     - name: Install Calico CNI

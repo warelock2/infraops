@@ -114,12 +114,20 @@
   vars:
     cp_to_remove: "{{ hostvars['localhost']['cp_to_remove'] }}"
   tasks:
+    - name: Check if departing control plane is reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 10
+      delegate_to: localhost
+      register: cp_reachable
+      ignore_errors: true
+
     - name: Stop keepalived to release the VIP claim
       ansible.builtin.systemd:
         name: keepalived
         state: stopped
       become: true
       ignore_errors: true
+      when: cp_reachable is succeeded
 
     - name: Stop haproxy to stop fronting the local apiserver
       ansible.builtin.systemd:
@@ -127,6 +135,7 @@
         state: stopped
       become: true
       ignore_errors: true
+      when: cp_reachable is succeeded
 
 - name: K8s Drain Removed Nodes — Repoint Surviving Load Balancer
   hosts: survivor_cp
@@ -146,7 +155,9 @@
     - name: Validate and reload haproxy when backends changed
       ansible.builtin.command:
         cmd: sudo sh -c 'haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null && systemctl reload haproxy'
-      when: haproxy_strip.results | map(attribute='stdout') | select('search', 'changed') | list | length > 0
+      when:
+        - haproxy_strip is defined
+        - haproxy_strip.results | map(attribute='stdout') | select('search', 'changed') | list | length > 0
 
     - name: Wait for the API endpoint to answer on the VIP
       ansible.builtin.wait_for:

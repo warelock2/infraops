@@ -103,6 +103,32 @@ jobs:
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
+      - name: K8s Drain Removed Nodes
+        if: github.ref == 'refs/heads/master'
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
+        with:
+          args: >
+            sh -c "
+            K8S_DOMAIN=\$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
+            CP01=\$(yq -r '.clusters[0].name' conf/infrastructure.yaml) &&
+            CP_FQDN=k8s-\${CP01}-control-01.\${K8S_DOMAIN} &&
+            if ! python3 -c 'import socket,sys; s=socket.create_connection((sys.argv[1], 22), 5); s.close()' \"\${CP_FQDN}\" >/dev/null 2>&1; then
+              echo \"\${CP_FQDN} control plane not reachable on port 22 - no existing cluster to drain (new/destroyed cluster); skipping\";
+              exit 0;
+            fi &&
+            mkdir -p ~/.kube &&
+            echo \"\$ANSIBLE_SSH_PRIVATE_KEY\" > /tmp/ansible_key &&
+            chmod 600 /tmp/ansible_key &&
+            if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/ansible_key ansible@\${CP_FQDN} 'test -f /etc/kubernetes/admin.conf' 2>/dev/null; then
+              echo \"\${CP_FQDN} reachable but not bootstrapped (no admin.conf) - no cluster to drain; skipping\";
+              exit 0;
+            fi &&
+            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/ansible_key ansible@\${CP_FQDN} 'sudo cat /etc/kubernetes/admin.conf' > ~/.kube/config &&
+            chmod 600 ~/.kube/config &&
+            ansible-playbook ansible/playbooks/k8s-drain-removed-nodes.yaml -i localhost,"
+        env:
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+
       - name: DNS Consistency Enforcement
         id: dns-enforce
         if: github.ref == 'refs/heads/master'
@@ -158,32 +184,6 @@ jobs:
             echo \"has_clusters=$([ \"$CLUSTERS\" -gt 0 ] && echo true || echo false)\" >> $GITHUB_OUTPUT &&
             CM_TAGGED=$(yq '[.clusters[]?.enforcement[], .hosts[]?.enforcement[]] | any_c(. == \"configuration_management\")' conf/infrastructure.yaml) &&
             echo \"has_config_management=$CM_TAGGED\" >> $GITHUB_OUTPUT"
-
-      - name: K8s Drain Removed Nodes
-        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_clusters == 'true'
-        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
-        with:
-          args: >
-            sh -c "
-            K8S_DOMAIN=\$(yq .platform.proxmox.dns_domain conf/infrastructure.yaml) &&
-            CP01=\$(yq -r '.clusters[0].name' conf/infrastructure.yaml) &&
-            CP_FQDN=k8s-\${CP01}-control-01.\${K8S_DOMAIN} &&
-            if ! python3 -c 'import socket,sys; s=socket.create_connection((sys.argv[1], 22), 5); s.close()' \"\${CP_FQDN}\" >/dev/null 2>&1; then
-              echo \"\${CP_FQDN} control plane not reachable on port 22 - no existing cluster to drain (new/destroyed cluster); skipping\";
-              exit 0;
-            fi &&
-            mkdir -p ~/.kube &&
-            echo \"\$ANSIBLE_SSH_PRIVATE_KEY\" > /tmp/ansible_key &&
-            chmod 600 /tmp/ansible_key &&
-            if ! ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/ansible_key ansible@\${CP_FQDN} 'test -f /etc/kubernetes/admin.conf' 2>/dev/null; then
-              echo \"\${CP_FQDN} reachable but not bootstrapped (no admin.conf) - no cluster to drain; skipping\";
-              exit 0;
-            fi &&
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/ansible_key ansible@\${CP_FQDN} 'sudo cat /etc/kubernetes/admin.conf' > ~/.kube/config &&
-            chmod 600 ~/.kube/config &&
-            ansible-playbook ansible/playbooks/k8s-drain-removed-nodes.yaml -i localhost,"
-        env:
-          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
 
       - name: Fix Terraform Dir Permissions
         if: github.ref == 'refs/heads/master'
