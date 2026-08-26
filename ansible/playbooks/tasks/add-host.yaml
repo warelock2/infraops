@@ -138,10 +138,3 @@
 - name: Add — report allocated IP
   ansible.builtin.debug:
     msg: "DNS_ALLOCATED_IP={{ next_ip }}"
-
-- name: Add — write allocated IP result
-  ansible.builtin.copy:
-    content: "{{ next_ip }}\n"
-    dest: "{{ dns_result_file }}"
-    mode: "0600"
-  when: dns_result_file is defined
