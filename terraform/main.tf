@@ -247,57 +247,18 @@ locals {
 }
 
 # ---------------------------------------------------------------------------
-# DNS pre-registration for cluster VMs.
-#
-# Before a VM boots it needs a static IP. We ask pfSense (via an Ansible
-# playbook) to reserve a DNS A record for the VM's hostname. The subsequent
-# data.external.dns_lookup then resolves that name to the IP we hand to
-# cloud-init. Without the reservation, the lookup would come back empty.
-#
-# local-exec runs a shell command on the Terraform machine. It is the
-# "escape hatch" when the provider can't do something natively. The destroy
-# variant (when = destroy) removes the record when the VM goes away.
+# Allocate a DNS override and return its authoritative IP to Terraform.
+# The external program performs both operations in one step, so VM cloud-init
+# consumes the address returned by the allocator rather than doing a second
+# resolver lookup that could observe a stale DHCP lease.
 # ---------------------------------------------------------------------------
-resource "terraform_data" "dns_alloc" {
+data "external" "dns_alloc" {
   for_each = local.vms
+  program  = ["sh", "${path.root}/../scripts/dns-allocate.sh", each.key, local.dns_ip_pool.start, local.dns_ip_pool.end]
 
-  # Force the provisioner to re-run when VM hardware/config changes. Without this,
-  # Terraform only runs local-exec when the resource is first created — stale
-  # DNS entries from a previous apply (e.g. DHCP ghosts) would never be corrected.
-  # standby is operational state, not config; exclude so promotion doesn't replace VM.
-  triggers_replace = [each.key, sha256(jsonencode({
-    cores     = each.value.cores
-    memory    = each.value.memory
-    disk      = each.value.disk
-    datastore = each.value.datastore
-  }))]
-
-  input = {
+  query = {
     name = each.key
   }
-
-  provisioner "local-exec" {
-    command = "ansible-playbook ${path.root}/../ansible/playbooks/manage-iac-dns.yaml -e 'workflow=add:${each.key}'"
-  }
-
-  # No destroy provisioner. When triggers_replace fires (VM config changed),
-  # Terraform destroys + recreates this resource. A destroy provisioner would
-  # DELETE the DNS entry before the create provisioner re-runs, causing
-  # non-deterministic IP re-allocation (DNS shuffle). Stale entries for removed
-  # VMs are handled by the ghost cleanup step in CI.
-}
-
-# ---------------------------------------------------------------------------
-# Resolve the DNS record to an IP.
-#
-# The external provider runs scripts/dns-lookup.sh <hostname> and parses its
-# JSON output. depends_on forces the DNS allocation above to finish first.
-# each.value.result.ip is consumed by the VM's cloud-init ip_config.
-# ---------------------------------------------------------------------------
-data "external" "dns_lookup" {
-  for_each   = local.vms
-  depends_on = [terraform_data.dns_alloc]
-  program    = ["sh", "${path.root}/../scripts/dns-lookup.sh", "${each.key}.${local.dns_domain}", local.dns_ip_pool.start, local.dns_ip_pool.end]
 }
 
 # ===========================================================================
@@ -351,11 +312,9 @@ resource "proxmox_virtual_environment_vm" "vm" {
 
     ignore_changes = [initialization, tags, started]
 
-    # When dns_alloc is replaced (VM config changed), recreate the VM so
-    # cloud-init picks up the fresh IP from dns-lookup.sh. Without this,
-    # Terraform treats memory/disk changes as in-place updates, leaving
-    # the VM running with a stale IP that no longer matches DNS.
-    replace_triggered_by = [terraform_data.dns_alloc[each.key]]
+    # When the allocator result changes, recreate the VM so cloud-init picks
+    # up the newly allocated address.
+    replace_triggered_by = [data.external.dns_alloc[each.key]]
   }
 
   # QEMU guest agent gives Proxmox clean shutdown + guest info. wait_for_ip is
@@ -405,7 +364,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   initialization {
     ip_config {
       ipv4 {
-        address = "${data.external.dns_lookup[each.key].result.ip}/24"
+        address = "${data.external.dns_alloc[each.key].result.ip}/24"
         gateway = local.gateway
       }
     }
@@ -424,31 +383,15 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 }
 
-# Standalone host DNS allocation
-# Same pattern as the cluster DNS alloc above, but for standalone hosts
-# (docker, firewall, ...) rather than cluster nodes.
-resource "terraform_data" "standalone_dns_alloc" {
+# Standalone host DNS allocation. The returned IP is used directly by
+# cloud-init, avoiding a second resolver lookup.
+data "external" "standalone_dns_alloc" {
   for_each = local.standalone_hosts_provision
+  program  = ["sh", "${path.root}/../scripts/dns-allocate.sh", each.key, local.dns_ip_pool.start, local.dns_ip_pool.end]
 
-  triggers_replace = [each.key, sha256(jsonencode(each.value))]
-
-  input = {
+  query = {
     name = each.key
   }
-
-  provisioner "local-exec" {
-    command = "ansible-playbook ${path.root}/../ansible/playbooks/manage-iac-dns.yaml -e 'workflow=add:${each.key}'"
-  }
-
-  # No destroy provisioner — same rationale as dns_alloc above.
-}
-
-# Standalone host DNS lookup
-# Same DNS round-trip as the cluster nodes, for standalone hosts.
-data "external" "standalone_dns_lookup" {
-  for_each   = local.standalone_hosts_provision
-  depends_on = [terraform_data.standalone_dns_alloc]
-  program    = ["sh", "${path.root}/../scripts/dns-lookup.sh", "${each.key}.${local.dns_domain}", local.dns_ip_pool.start, local.dns_ip_pool.end]
 }
 
 # Standalone host VM ID allocation
@@ -533,7 +476,7 @@ resource "proxmox_virtual_environment_vm" "standalone" {
   initialization {
     ip_config {
       ipv4 {
-        address = "${data.external.standalone_dns_lookup[each.key].result.ip}/24"
+        address = "${data.external.standalone_dns_alloc[each.key].result.ip}/24"
         gateway = local.gateway
       }
     }

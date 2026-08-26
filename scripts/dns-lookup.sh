@@ -8,16 +8,11 @@
 # exact shape Terraform's external data source expects:
 #   {"ip":"<address>"}
 #
-# Resolution order: getent (glibc) first, then Python's socket (fallback for
-# hosts without getent). Empty string if unresolvable.
+# With a pool supplied, read the exact pfSense host override created by the
+# allocation step. Resolver answers are deliberately not used because they may
+# contain stale DHCP leases or cached records.
 #
-# The IaC DNS pool (start/end) is the AUTHORITATIVE range for VM static
-# addresses. When supplied, ONLY an answer inside the pool is acceptable —
-# an out-of-pool record (a stale DHCP "ghost" or any foreign registration)
-# must NEVER become a VM's static IP. If the resolver yields no in-pool
-# answer, the script asks pfSense's host-override API directly (the source
-# of truth the IaC allocation writes to, immune to resolver caches and
-# DHCP-lease ghosts) and accepts the override's IP only if it is in-pool.
+# Without a pool, retain the historical resolver lookup behavior.
 #
 # Usage: dns-lookup.sh <hostname> [pool_start] [pool_end]
 # ===========================================================================
@@ -27,43 +22,7 @@ POOL_START="$2"
 POOL_END="$3"
 IP=""
 
-if command -v getent >/dev/null 2>&1; then
-    IP_LIST=$(getent hosts "$HOST" 2>/dev/null | awk '{print $1}')
-elif command -v python3 >/dev/null 2>&1; then
-    IP_LIST=$(python3 -c "import socket; print(socket.gethostbyname('$HOST'))" 2>/dev/null || echo "")
-fi
-
-[ -z "$IP_LIST" ] && IP_LIST=""
-
-# Normalize pool bounds to integers for comparison (IPv4 only; anything else
-# leaves the pool filters inert and the lookup falls back to plain getent).
 if [ -n "$POOL_START" ] && [ -n "$POOL_END" ]; then
-    _start=$(echo "$POOL_START" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
-    _end=$(echo "$POOL_END" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
-fi
-
-for candidate in $IP_LIST; do
-    if [ -n "$_start" ] && [ -n "$_end" ]; then
-        _val=$(echo "$candidate" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
-        if [ "$_val" -ge "$_start" ] && [ "$_val" -le "$_end" ] 2>/dev/null; then
-            IP="$candidate"
-            break
-        fi
-    elif [ -z "$IP" ]; then
-        IP="$candidate"
-    fi
-done
-
-# No pool given: fall back to the first resolver answer (historical behavior).
-if [ -z "$IP" ] && [ -z "$_start" ] && [ -z "$_end" ]; then
-    IP=$(echo "$IP_LIST" | head -1)
-fi
-
-# Authoritative fallback for the pool case: the resolver returned no in-pool
-# answer (stale resolver cache serving a ghost, or the override simply not yet
-# visible). The host-override record dns_alloc just created is the truth, so
-# read it straight from pfSense instead of trusting a foreign record.
-if [ -z "$IP" ] && [ -n "$_start" ] && [ -n "$_end" ]; then
     SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
     INFRA="$SCRIPT_DIR/../conf/infrastructure.yaml"
     if [ -f "$INFRA" ] \
@@ -78,16 +37,22 @@ if [ -z "$IP" ] && [ -n "$_start" ] && [ -n "$_end" ]; then
         if [ -n "$PFSENSE_HOST" ] && [ -n "$PFSENSE_API_KEY" ]; then
             _name="${HOST%%.*}"
             _domain="${HOST#*.}"
-            API_IP=$(curl -k -sS -H "x-api-key: $PFSENSE_API_KEY" \
+            IP=$(curl -k -sS -H "x-api-key: $PFSENSE_API_KEY" \
                 "https://$PFSENSE_HOST/api/v2/services/dns_resolver/host_overrides" 2>/dev/null |
                 jq -r --arg h "$_name" --arg d "$_domain" '.data[] | select(.host == $h and .domain == $d) | .ip[0]' 2>/dev/null | head -1)
-            if [ -n "$API_IP" ]; then
-                _val=$(echo "$API_IP" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
-                if [ "$_val" -ge "$_start" ] && [ "$_val" -le "$_end" ] 2>/dev/null; then
-                    IP="$API_IP"
-                fi
+            _start=$(echo "$POOL_START" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
+            _end=$(echo "$POOL_END" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
+            _val=$(echo "$IP" | awk -F. '{print $1*16777216 + $2*65536 + $3*256 + $4}')
+            if [ -z "$IP" ] || [ "$_val" -lt "$_start" ] || [ "$_val" -gt "$_end" ] 2>/dev/null; then
+                IP=""
             fi
         fi
+    fi
+else
+    if command -v getent >/dev/null 2>&1; then
+        IP=$(getent hosts "$HOST" 2>/dev/null | awk 'NR == 1 {print $1}')
+    elif command -v python3 >/dev/null 2>&1; then
+        IP=$(python3 -c "import socket; print(socket.gethostbyname('$HOST'))" 2>/dev/null || echo "")
     fi
 fi
 
