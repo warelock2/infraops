@@ -131,7 +131,7 @@
         owner: "{{ infra_admin_user }}"
         group: "{{ infra_admin_group }}"
 
-- name: Generate self-signed TLS certificate
+    - name: Generate self-signed TLS certificate
       ansible.builtin.command:
         cmd: >
           openssl req -x509 -nodes -days 3650 -newkey rsa:2048
@@ -139,7 +139,9 @@
           -out "{{ kc_project_dir }}/certs/tls.crt"
           -subj "/CN={{ kc_domain }}"
           -addext "subjectAltName=DNS:{{ kc_domain }}"
-      creates: "{{ kc_project_dir }}/certs/tls.crt"
+        creates: "{{ kc_project_dir }}/certs/tls.crt"
+
+
 
     - name: Set certificate file permissions and ownership
       ansible.builtin.file:
