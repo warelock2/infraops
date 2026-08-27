@@ -111,7 +111,8 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     terraform -chdir=terraform state list | grep 'data.external.dns_alloc' || echo "  (no DNS alloc entries in state)"
     echo "=== Re-planning after state cleanup ==="
     set +e
-    PLAN_OUT=$(terraform -chdir=terraform plan -no-color -input=false -parallelism=1 2>&1)
+    # Use -refresh=false to avoid re-evaluating data sources (Terraform 1.7+ validation)
+    PLAN_OUT=$(terraform -chdir=terraform plan -refresh=false -no-color -input=false -parallelism=1 2>&1)
     PLAN_RC=$?
     set -e
     echo "Re-plan exit code: $PLAN_RC"
