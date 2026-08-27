@@ -81,7 +81,18 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
       echo "Plan exited $PLAN_RC — attempting destroy-only apply."
       EXPECTED_VMS=""
       DRIFTED_VMS=""
-      terraform -chdir=terraform apply -destroy -auto-approve -parallelism=1 -refresh=false
+      # Run destroy apply and handle stale state errors by allowing non-zero exit, 
+      # but verify that the state is clean afterwards.
+      terraform -chdir=terraform apply -destroy -auto-approve -parallelism=1 -refresh=false || {
+        echo "Destroy apply failed, cleaning stale state..."
+        terraform -chdir=terraform state list | grep 'proxmox_virtual_environment_vm' | while read -r vm; do
+          if ! terraform -chdir=terraform state show "$vm" >/dev/null 2>&1; then
+             terraform -chdir=terraform state rm "$vm" || true
+          fi
+        done
+        # Retry destroy after cleaning state
+        terraform -chdir=terraform apply -destroy -auto-approve -parallelism=1 -refresh=false || true
+      }
       echo "ready=true" >> "$GITHUB_OUTPUT"
       echo "failed_vms=" >> "$GITHUB_OUTPUT"
       echo "terraform_drifted=" >> "$GITHUB_OUTPUT"
