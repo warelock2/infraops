@@ -95,6 +95,43 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
       ;;
   esac
 
+  # Check if plan only destroys data.external.dns_alloc (stale state)
+  # If so, clean stale state entries and re-plan
+  if echo "$PLAN_OUT" | grep -q '^Plan: 0 to add, 0 to change, [0-9]* to destroy\.$' && \
+     echo "$PLAN_OUT" | grep -q 'data.external.dns_alloc' && \
+     ! echo "$PLAN_OUT" | grep -q 'proxmox_virtual_environment_vm'; then
+    echo "=== Plan only destroys DNS alloc data sources — cleaning stale state ==="
+    terraform -chdir=terraform state list | grep 'data.external.dns_alloc' | while read -r res; do
+      echo "Removing stale state: $res"
+      terraform -chdir=terraform state rm "$res" || true
+    done
+    echo "=== Re-planning after state cleanup ==="
+    PLAN_OUT=$(terraform -chdir=terraform plan -no-color -input=false -parallelism=1 2>&1)
+    PLAN_RC=$?
+    echo "$PLAN_OUT"
+    if [ "$PLAN_RC" -eq 1 ] && echo "$PLAN_OUT" | grep -q 'no change found for data.external.dns_alloc'; then
+      PLAN_RC=2
+    fi
+    case "$PLAN_RC" in
+      0)
+        echo "Plan after cleanup: no changes."
+        EXPECTED_VMS=""
+        DRIFTED_VMS=""
+        echo "ready=true" >> "$GITHUB_OUTPUT"
+        echo "failed_vms=" >> "$GITHUB_OUTPUT"
+        echo "terraform_drifted=" >> "$GITHUB_OUTPUT"
+        exit 0
+        ;;
+      2)
+        echo "Plan after cleanup: changes detected."
+        ;;
+      *)
+        echo "Plan after cleanup failed with exit $PLAN_RC"
+        exit 1
+        ;;
+    esac
+  fi
+
   echo "=== PHASE: APPLY ==="
   terraform -chdir=terraform apply -parallelism=1 -auto-approve
 
