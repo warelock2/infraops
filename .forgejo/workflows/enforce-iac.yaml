@@ -140,17 +140,14 @@ jobs:
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
-      - name: Terraform Plan
+- name: Terraform Plan
         id: plan
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
             sh -c "sh scripts/record-timing.sh plan &&
-            sh scripts/terraform-init-retry.sh -chdir=terraform init && set +e;
-            terraform -chdir=terraform plan -detailed-exitcode -no-color -input=false > /tmp/plan_output.txt 2>&1;
-            PLAN_EXIT=\$?;
-            set -e;
-            echo \"plan_exit=\$PLAN_EXIT\" >> \$GITHUB_OUTPUT && cat /tmp/plan_output.txt"
+            sh scripts/terraform-init-retry.sh -chdir=terraform init &&
+            terraform -chdir=terraform plan -detailed-exitcode -no-color -input=false > /tmp/plan_output.txt 2>&1; echo \"plan_exit=\$?\" >> \$GITHUB_OUTPUT; cat /tmp/plan_output.txt"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
@@ -164,13 +161,13 @@ jobs:
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c "PLAN_EXIT=\${PLAN_EXIT:-0} &&
+            sh -c "PLAN_EXIT=\${PLAN_EXIT:-2} &&
             if [ \"\$PLAN_EXIT\" = \"2\" ]; then
               echo 'changed=true' >> \$GITHUB_OUTPUT
             else
               echo 'changed=false' >> \$GITHUB_OUTPUT
             fi &&
-            echo \"Infrastructure changes detected: \$(echo \$PLAN_EXIT | grep -q 2 && echo true || echo false)\""
+            echo \"Infrastructure changes detected: \$( [ \"\$PLAN_EXIT\" = \"2\" ] && echo true || echo false)\""
         env:
           PLAN_EXIT: ${{ steps.plan.outputs.plan_exit }}
 

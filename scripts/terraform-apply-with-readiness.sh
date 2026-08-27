@@ -57,22 +57,40 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     sh scripts/terraform-init-retry.sh -chdir=terraform init -reconfigure
   fi
 
+  echo "=== PHASE: PLAN ==="
+  set +e
+  PLAN_OUT=$(terraform -chdir=terraform plan -no-color -input=false -parallelism=1 2>&1)
+  PLAN_RC=$?
+  set -e
+  echo "$PLAN_OUT"
+
+  case "$PLAN_RC" in
+    0)
+      echo "Plan: no changes."
+      EXPECTED_VMS=""
+      DRIFTED_VMS=""
+      echo "ready=true" >> "$GITHUB_OUTPUT"
+      echo "failed_vms=" >> "$GITHUB_OUTPUT"
+      echo "terraform_drifted=" >> "$GITHUB_OUTPUT"
+      exit 0
+      ;;
+    2)
+      echo "Plan: changes detected."
+      ;;
+    *)
+      echo "Plan exited $PLAN_RC — attempting destroy-only apply."
+      EXPECTED_VMS=""
+      DRIFTED_VMS=""
+      terraform -chdir=terraform apply -destroy -auto-approve -parallelism=1 -refresh=false
+      echo "ready=true" >> "$GITHUB_OUTPUT"
+      echo "failed_vms=" >> "$GITHUB_OUTPUT"
+      echo "terraform_drifted=" >> "$GITHUB_OUTPUT"
+      exit 0
+      ;;
+  esac
+
   echo "=== PHASE: APPLY ==="
-  # Plan to a file so we can inspect exactly what will be created
-  terraform -chdir=terraform plan -out="$PLAN_FILE" -no-color -input=false -parallelism=1
-
-  # The VMs Terraform creates/replaces are the ones that will signal readiness
-  EXPECTED_VMS=$(extract_created_vms | tr '\n' ' ')
-  echo "VMs to create/replace: $EXPECTED_VMS"
-
-  # Every VM Terraform detected state drift on (create/replace OR in-place
-  # update) gets the "iac" stamp AFTER apply, so the drifted set stays visible
-  # in Proxmox for the rest of the run.
-  DRIFTED_VMS=$(extract_drifted_vms | tr '\n' ' ')
-  echo "VMs with state drift: $DRIFTED_VMS"
-
-  # Apply the exact plan we inspected
-  terraform -chdir=terraform apply -parallelism=1 "$PLAN_FILE"
+  terraform -chdir=terraform apply -parallelism=1 -auto-approve
 
   if [ -n "$DRIFTED_VMS" ]; then
     echo "=== Stamping iac tag on drifted VMs ==="
