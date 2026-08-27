@@ -3,8 +3,14 @@ set -eu
 
 INPUT=$(cat)
 HOST=$(printf '%s' "$INPUT" | jq -r '.name')
-POOL_START=$(printf '%s' "$INPUT" | jq -r '.pool_start')
-POOL_END=$(printf '%s' "$INPUT" | jq -r '.pool_end')
+POOL_START=$(printf '%s' "$INPUT" | jq -r '.pool_start // empty')
+POOL_END=$(printf '%s' "$INPUT" | jq -r '.pool_end // empty')
+
+if [ -z "$POOL_START" ] || [ -z "$POOL_END" ]; then
+  printf '%s\n' '{"ip":"0.0.0.0"}'
+  exit 0
+fi
+
 exec 9>/tmp/terraform-dns-alloc.lock
 flock -x 9
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
