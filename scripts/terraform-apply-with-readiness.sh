@@ -64,6 +64,12 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   set -e
   echo "$PLAN_OUT"
 
+  # Terraform 1.7+ returns exit 1 on "no change found for data.external.dns_alloc"
+  # when plan only has destroys. Treat this as "changes detected" (exit 2).
+  if echo "$PLAN_OUT" | grep -q 'no change found for data.external.dns_alloc'; then
+    PLAN_RC=2
+  fi
+
   case "$PLAN_RC" in
     0)
       echo "Plan: no changes."

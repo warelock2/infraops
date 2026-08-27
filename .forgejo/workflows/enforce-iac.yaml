@@ -147,7 +147,7 @@ jobs:
           args: >
             sh -c "sh scripts/record-timing.sh plan &&
             sh scripts/terraform-init-retry.sh -chdir=terraform init &&
-            terraform -chdir=terraform plan -detailed-exitcode -no-color -input=false > /tmp/plan_output.txt 2>&1; echo \"plan_exit=\$?\" >> \$GITHUB_OUTPUT; cat /tmp/plan_output.txt"
+            terraform -chdir=terraform plan -detailed-exitcode -no-color -input=false > /tmp/plan_output.txt 2>&1; PLAN_RC=\$?; if grep -q 'no change found for data.external.dns_alloc' /tmp/plan_output.txt; then echo 'plan_exit=2' >> \$GITHUB_OUTPUT; else echo \"plan_exit=\$PLAN_RC\" >> \$GITHUB_OUTPUT; fi; cat /tmp/plan_output.txt"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
