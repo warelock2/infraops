@@ -110,8 +110,10 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     done
     # Clean VM state entries that don't exist in Proxmox (query Proxmox API)
     PROXMOX_NODE=$(yq ".platform.proxmox.node" conf/infrastructure.yaml)
-    PROXMOX_TOKEN=$(vault kv get -field=api_token secret/infraops/proxmox 2>/dev/null || echo "")
-    if [ -n "$PROXMOX_TOKEN" ]; then
+    echo "Getting Proxmox token from Vault..."
+    PROXMOX_TOKEN=$(vault kv get -field=api_token secret/infraops/proxmox 2>&1 || echo "VAULT_ERROR")
+    echo "Vault result: $PROXMOX_TOKEN"
+    if [ -n "$PROXMOX_TOKEN" ] && [ "$PROXMOX_TOKEN" != "VAULT_ERROR" ]; then
       terraform -chdir=terraform state list | grep 'proxmox_virtual_environment_vm' | while read -r res; do
         # Extract VM ID from state
         VM_ID=$(terraform -chdir=terraform state show "$res" 2>/dev/null | grep '^  vm_id' | head -1 | awk '{print $3}')
