@@ -114,6 +114,8 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     PROXMOX_TOKEN=$(vault kv get -field=api_token secret/infraops/proxmox 2>&1 || echo "VAULT_ERROR")
     echo "Vault result: $PROXMOX_TOKEN"
     if [ -n "$PROXMOX_TOKEN" ] && [ "$PROXMOX_TOKEN" != "VAULT_ERROR" ]; then
+      echo "Proxmox token retrieved, checking VM state..."
+      terraform -chdir=terraform state list | grep 'proxmox_virtual_environment_vm' | while read -r res; do
       terraform -chdir=terraform state list | grep 'proxmox_virtual_environment_vm' | while read -r res; do
         # Extract VM ID from state
         VM_ID=$(terraform -chdir=terraform state show "$res" 2>/dev/null | grep '^  vm_id' | head -1 | awk '{print $3}')
