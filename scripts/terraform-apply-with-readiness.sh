@@ -105,8 +105,10 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     echo "=== Plan only destroys DNS alloc data sources — cleaning stale state ==="
     terraform -chdir=terraform state list | grep 'data.external.dns_alloc' | while read -r res; do
       echo "Removing stale state: $res"
-      terraform -chdir=terraform state rm "$res" || true
+      terraform -chdir=terraform state rm "$res" 2>&1 || echo "  -> state rm failed for $res"
     done
+    echo "=== State list after cleanup ==="
+    terraform -chdir=terraform state list | grep 'data.external.dns_alloc' || echo "  (no DNS alloc entries in state)"
     echo "=== Re-planning after state cleanup ==="
     set +e
     PLAN_OUT=$(terraform -chdir=terraform plan -no-color -input=false -parallelism=1 2>&1)
