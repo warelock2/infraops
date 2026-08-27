@@ -10,6 +10,10 @@ flock -x 9
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 BASE=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 INFRA="$BASE/conf/infrastructure.yaml"
+if [ -x "$BASE/.venv/bin/python" ]; then
+  export ANSIBLE_PYTHON_INTERPRETER="$BASE/.venv/bin/python"
+fi
+export ANSIBLE_CONFIG="$BASE/ansible/ansible.cfg"
 
 DOMAIN=$(yq -r '.platform.proxmox.dns_domain' "$INFRA")
 FQDN="$HOST"

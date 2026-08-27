@@ -44,6 +44,8 @@
 - name: Setup — read infrastructure and get API key
   hosts: localhost
   gather_facts: no
+  vars:
+    ansible_python_interpreter: "{{ lookup('env', 'ANSIBLE_PYTHON_INTERPRETER') | default('/usr/bin/python3', true) }}"
   tasks:
     - name: Validate workflow parameter
       ansible.builtin.assert:
@@ -143,6 +145,7 @@
   hosts: localhost
   gather_facts: no
   vars:
+    ansible_python_interpreter: "{{ lookup('env', 'ANSIBLE_PYTHON_INTERPRETER') | default('/usr/bin/python3', true) }}"
     pfsense_api_key: "{{ hostvars['localhost']['pfsense_api_key'] }}"
     pfsense_host: "{{ hostvars['localhost']['pfsense_host'] }}"
     ip_pool: "{{ hostvars['localhost']['ip_pool'] }}"
