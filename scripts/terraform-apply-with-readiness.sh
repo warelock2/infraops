@@ -108,15 +108,29 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
       echo "Removing stale DNS alloc state: $res"
       terraform -chdir=terraform state rm "$res" 2>&1 || echo "  -> state rm failed for $res"
     done
-    # Clean VM state entries that don't exist in Proxmox
-    terraform -chdir=terraform state list | grep 'proxmox_virtual_environment_vm' | while read -r res; do
-      echo "Checking VM state: $res"
-      # Try to refresh - if it fails, VM doesn't exist in Proxmox
-      if ! terraform -chdir=terraform state show "$res" >/dev/null 2>&1; then
-        echo "Removing stale VM state: $res"
-        terraform -chdir=terraform state rm "$res" 2>&1 || echo "  -> state rm failed for $res"
-      fi
-    done
+    # Clean VM state entries that don't exist in Proxmox (query Proxmox API)
+    PROXMOX_NODE=$(yq ".platform.proxmox.node" conf/infrastructure.yaml)
+    PROXMOX_TOKEN=$(vault kv get -field=api_token secret/infraops/proxmox 2>/dev/null || echo "")
+    if [ -n "$PROXMOX_TOKEN" ]; then
+      terraform -chdir=terraform state list | grep 'proxmox_virtual_environment_vm' | while read -r res; do
+        # Extract VM ID from state
+        VM_ID=$(terraform -chdir=terraform state show "$res" 2>/dev/null | grep '^  vm_id' | head -1 | awk '{print $3}')
+        if [ -n "$VM_ID" ] && [ "$VM_ID" -gt 0 ]; then
+          echo "Checking VM $res (VMID=$VM_ID) in Proxmox..."
+          HTTP_CODE=$(curl -k -sS -o /dev/null -w "%{http_code}" \
+            -H "Authorization: PVEAPIToken=$PROXMOX_TOKEN" \
+            "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VM_ID}/status/current")
+          if [ "$HTTP_CODE" = "404" ]; then
+            echo "VM $VM_ID not found in Proxmox, removing from state: $res"
+            terraform -chdir=terraform state rm "$res" 2>&1 || echo "  -> state rm failed for $res"
+          else
+            echo "VM $VM_ID exists in Proxmox (HTTP $HTTP_CODE), keeping in state"
+          fi
+        fi
+      done
+    else
+      echo "WARNING: Could not get Proxmox token, skipping VM state cleanup"
+    fi
     echo "=== State list after cleanup ==="
     terraform -chdir=terraform state list | grep -E 'data.external.dns_alloc|proxmox_virtual_environment_vm' || echo "  (no stale entries in state)"
     echo "=== Re-planning after state cleanup ==="
