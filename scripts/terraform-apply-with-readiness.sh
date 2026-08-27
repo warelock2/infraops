@@ -97,9 +97,11 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
 
   # Check if plan only destroys data.external.dns_alloc (stale state)
   # If so, clean stale state entries and re-plan
+  # Extract the planned destroy actions (between "Plan:" summary and next section)
+  PLAN_DESTROYS=$(echo "$PLAN_OUT" | sed -n '/^Plan: .* to destroy\.$/,/^$/p' | head -30)
   if echo "$PLAN_OUT" | grep -q '^Plan: 0 to add, 0 to change, [0-9]* to destroy\.$' && \
      echo "$PLAN_OUT" | grep -q 'data.external.dns_alloc' && \
-     ! echo "$PLAN_OUT" | grep -q 'proxmox_virtual_environment_vm'; then
+     ! echo "$PLAN_DESTROYS" | grep -q 'proxmox_virtual_environment_vm'; then
     echo "=== Plan only destroys DNS alloc data sources — cleaning stale state ==="
     terraform -chdir=terraform state list | grep 'data.external.dns_alloc' | while read -r res; do
       echo "Removing stale state: $res"
