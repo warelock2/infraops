@@ -140,7 +140,7 @@ jobs:
           VAULT_SKIP_VERIFY: "true"
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
-- name: Terraform Plan
+      - name: Terraform Plan
         id: plan
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
