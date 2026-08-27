@@ -102,13 +102,23 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   if echo "$PLAN_OUT" | grep -q '^Plan: 0 to add, 0 to change, [0-9]* to destroy\.$' && \
      echo "$PLAN_OUT" | grep -q 'data.external.dns_alloc' && \
      ! echo "$PLAN_DESTROYS" | grep -q 'proxmox_virtual_environment_vm'; then
-    echo "=== Plan only destroys DNS alloc data sources — cleaning stale state ==="
+    echo "=== Plan only destroys DNS alloc data sources — cleaning all stale state ==="
+    # Clean DNS alloc data sources
     terraform -chdir=terraform state list | grep 'data.external.dns_alloc' | while read -r res; do
-      echo "Removing stale state: $res"
+      echo "Removing stale DNS alloc state: $res"
       terraform -chdir=terraform state rm "$res" 2>&1 || echo "  -> state rm failed for $res"
     done
+    # Clean VM state entries that don't exist in Proxmox
+    terraform -chdir=terraform state list | grep 'proxmox_virtual_environment_vm' | while read -r res; do
+      echo "Checking VM state: $res"
+      # Try to refresh - if it fails, VM doesn't exist in Proxmox
+      if ! terraform -chdir=terraform state show "$res" >/dev/null 2>&1; then
+        echo "Removing stale VM state: $res"
+        terraform -chdir=terraform state rm "$res" 2>&1 || echo "  -> state rm failed for $res"
+      fi
+    done
     echo "=== State list after cleanup ==="
-    terraform -chdir=terraform state list | grep 'data.external.dns_alloc' || echo "  (no DNS alloc entries in state)"
+    terraform -chdir=terraform state list | grep -E 'data.external.dns_alloc|proxmox_virtual_environment_vm' || echo "  (no stale entries in state)"
     echo "=== Re-planning after state cleanup ==="
     set +e
     # Use -refresh=false to avoid re-evaluating data sources (Terraform 1.7+ validation)
