@@ -286,6 +286,11 @@ data "external" "dns_alloc" {
 # a vendor data file (the readiness snippet). This is what makes each cloned
 # VM a unique, addressable member of the infrastructure.
 # ===========================================================================
+resource "terraform_data" "dns_alloc_trigger" {
+  for_each = local.vms
+  input    = data.external.dns_alloc[each.key].result.ip
+}
+
 resource "proxmox_virtual_environment_vm" "vm" {
   for_each  = local.vms
   name      = each.key
@@ -315,8 +320,11 @@ resource "proxmox_virtual_environment_vm" "vm" {
     ignore_changes = [initialization, tags, started]
 
     # When the allocator result changes, recreate the VM so cloud-init picks
-    # up the newly allocated address.
-    replace_triggered_by = [data.external.dns_alloc[each.key]]
+    # up the newly allocated address. The trigger wraps the data source value
+    # in a terraform_data (managed) resource: referencing the raw data source
+    # here trips Terraform 1.7+'s "no change found" validation because the
+    # only consumer (initialization) is in ignore_changes.
+    replace_triggered_by = [terraform_data.dns_alloc_trigger[each.key]]
   }
 
   # QEMU guest agent gives Proxmox clean shutdown + guest info. wait_for_ip is
