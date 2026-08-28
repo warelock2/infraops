@@ -141,8 +141,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     terraform -chdir=terraform state list | grep -E 'data.external.dns_alloc|proxmox_virtual_environment_vm' || echo "  (no stale entries in state)"
     echo "=== Re-planning after state cleanup ==="
     set +e
-    # Use -refresh=false to avoid re-evaluating data sources (Terraform 1.7+ validation)
-    PLAN_OUT=$(terraform -chdir=terraform plan -refresh=false -no-color -input=false -parallelism=1 2>&1)
+    PLAN_OUT=$(terraform -chdir=terraform plan -out="$PLAN_FILE" -no-color -input=false -parallelism=1 2>&1)
     PLAN_RC=$?
     set -e
     echo "Re-plan exit code: $PLAN_RC"
@@ -162,6 +161,13 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
         ;;
       2)
         echo "Plan after cleanup: changes detected."
+        EXPECTED_VMS=$(extract_created_vms)
+        DRIFTED_VMS=$(extract_drifted_vms 2>/dev/null || echo "")
+        if [ -n "$EXPECTED_VMS" ]; then
+          echo "  Plan after cleanup creates: $EXPECTED_VMS"
+        else
+          echo "  Plan after cleanup creates no new VMs."
+        fi
         ;;
       *)
         echo "Plan after cleanup failed with exit $PLAN_RC"
