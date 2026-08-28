@@ -110,22 +110,23 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     done
     # Clean VM state entries that don't exist in Proxmox (query Proxmox API)
     PROXMOX_NODE=$(yq ".platform.proxmox.node" conf/infrastructure.yaml)
-    echo "Getting Proxmox token from Vault..."
-    PROXMOX_TOKEN=$(vault kv get -field=api_token secret/infraops/proxmox 2>&1 || echo "VAULT_ERROR")
-    echo "Vault result: $PROXMOX_TOKEN"
+    PROXMOX_TOKEN=$(vault kv get -field=api_token secret/infraops/proxmox 2>/dev/null || echo "VAULT_ERROR")
     if [ -n "$PROXMOX_TOKEN" ] && [ "$PROXMOX_TOKEN" != "VAULT_ERROR" ]; then
       echo "Proxmox token retrieved, checking VM state..."
-      terraform -chdir=terraform state list | grep 'proxmox_virtual_environment_vm' | while read -r res; do
       terraform -chdir=terraform state list | grep 'proxmox_virtual_environment_vm' | while read -r res; do
         # Extract VM ID from state
         VM_ID=$(terraform -chdir=terraform state show "$res" 2>/dev/null | grep '^  vm_id' | head -1 | awk '{print $3}')
         if [ -n "$VM_ID" ] && [ "$VM_ID" -gt 0 ]; then
           echo "Checking VM $res (VMID=$VM_ID) in Proxmox..."
-          HTTP_CODE=$(curl -k -sS -o /dev/null -w "%{http_code}" \
+          # Proxmox returns HTTP 500 with a "does not exist" reason body for missing
+          # VMs (not 404). Capture body and treat either as missing.
+          RESP_BODY=$(curl -k -sS -w "\n%{http_code}" \
             -H "Authorization: PVEAPIToken=$PROXMOX_TOKEN" \
-            "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VM_ID}/status/current")
-          if [ "$HTTP_CODE" = "404" ]; then
-            echo "VM $VM_ID not found in Proxmox, removing from state: $res"
+            "https://${PROXMOX_NODE}:8006/api2/json/nodes/${PROXMOX_NODE}/qemu/${VM_ID}/status/current" 2>/dev/null)
+          HTTP_CODE=$(echo "$RESP_BODY" | tail -1)
+          BODY=$(echo "$RESP_BODY" | sed '$d')
+          if [ "$HTTP_CODE" = "404" ] || echo "$BODY" | grep -qi 'does not exist'; then
+            echo "VM $VM_ID missing in Proxmox (HTTP $HTTP_CODE), removing from state: $res"
             terraform -chdir=terraform state rm "$res" 2>&1 || echo "  -> state rm failed for $res"
           else
             echo "VM $VM_ID exists in Proxmox (HTTP $HTTP_CODE), keeping in state"
