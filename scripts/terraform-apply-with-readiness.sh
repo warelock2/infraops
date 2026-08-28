@@ -59,7 +59,11 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
 
   echo "=== PHASE: PLAN ==="
   set +e
-  PLAN_OUT=$(terraform -chdir=terraform plan -no-color -input=false -parallelism=1 2>&1)
+  # -detailed-exitcode is REQUIRED: plain `terraform plan` returns 0 for both
+  # "no changes" and "changes present". With -detailed-exitcode: 0=no changes,
+  # 2=changes present, 1=error. Without it the changes branch below is dead
+  # code and applies never happen.
+  PLAN_OUT=$(terraform -chdir=terraform plan -detailed-exitcode -out="$PLAN_FILE" -no-color -input=false -parallelism=1 2>&1)
   PLAN_RC=$?
   set -e
   echo "$PLAN_OUT"
@@ -94,6 +98,11 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
       exit 1
       ;;
   esac
+
+  # Extract created/drifted VMs from the saved plan (PLAN_RC=2 path). These are
+  # used to gate the readiness wait and to stamp the iac tag after apply.
+  EXPECTED_VMS=$(extract_created_vms)
+  DRIFTED_VMS=$(extract_drifted_vms 2>/dev/null || echo "")
 
   # Check if plan only destroys data.external.dns_alloc (stale state)
   # If so, clean stale state entries and re-plan
@@ -141,7 +150,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     terraform -chdir=terraform state list | grep -E 'data.external.dns_alloc|proxmox_virtual_environment_vm' || echo "  (no stale entries in state)"
     echo "=== Re-planning after state cleanup ==="
     set +e
-    PLAN_OUT=$(terraform -chdir=terraform plan -out="$PLAN_FILE" -no-color -input=false -parallelism=1 2>&1)
+    PLAN_OUT=$(terraform -chdir=terraform plan -detailed-exitcode -out="$PLAN_FILE" -no-color -input=false -parallelism=1 2>&1)
     PLAN_RC=$?
     set -e
     echo "Re-plan exit code: $PLAN_RC"
@@ -177,7 +186,11 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   fi
 
   echo "=== PHASE: APPLY ==="
-  terraform -chdir=terraform apply -parallelism=1 -auto-approve
+  # Apply the saved plan file (not -auto-approve): the plan file bakes in the
+  # computed data-source values, so apply does not re-read dns_alloc and cannot
+  # trip the Terraform 1.7+ "no change found" validation on apply.
+  echo "=== Applying saved plan: $PLAN_FILE ==="
+  terraform -chdir=terraform apply -parallelism=1 -no-color "$PLAN_FILE"
 
   if [ -n "$DRIFTED_VMS" ]; then
     echo "=== Stamping iac tag on drifted VMs ==="
