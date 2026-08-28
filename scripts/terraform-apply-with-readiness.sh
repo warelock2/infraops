@@ -114,8 +114,9 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     if [ -n "$PROXMOX_TOKEN" ] && [ "$PROXMOX_TOKEN" != "VAULT_ERROR" ]; then
       echo "Proxmox token retrieved, checking VM state..."
       terraform -chdir=terraform state list | grep 'proxmox_virtual_environment_vm' | while read -r res; do
-        # Extract VM ID from state
-        VM_ID=$(terraform -chdir=terraform state show "$res" 2>/dev/null | grep '^  vm_id' | head -1 | awk '{print $3}')
+        # Extract VM ID from state; vm_id may be quoted or unquoted
+        VM_ID=$(terraform -chdir=terraform state show "$res" 2>/dev/null | grep -oE 'vm_id[[:space:]]*=[[:space:]]*"?[0-9]+' | grep -oE '[0-9]+' | head -1)
+        echo "  VM $res -> extracted VMID='$VM_ID'"
         if [ -n "$VM_ID" ] && [ "$VM_ID" -gt 0 ]; then
           echo "Checking VM $res (VMID=$VM_ID) in Proxmox..."
           # Proxmox returns HTTP 500 with a "does not exist" reason body for missing
