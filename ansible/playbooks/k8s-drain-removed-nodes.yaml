@@ -143,6 +143,11 @@
   vars:
     cp_to_remove: "{{ hostvars['localhost']['cp_to_remove'] }}"
   tasks:
+    - name: Initialize haproxy_strip fact
+      ansible.builtin.set_fact:
+        haproxy_strip: {results: []}
+      when: haproxy_strip is not defined
+
     - name: Strip departing backends from haproxy config
       ansible.builtin.script:
         cmd: "{{ playbook_dir }}/../scripts/strip-haproxy-backend.sh {{ item }}"
