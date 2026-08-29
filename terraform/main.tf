@@ -211,7 +211,7 @@ locals {
   # ip_pool). dns-lookup.sh prefers answers inside this range so a DHCP lease
   # registration or other foreign record can never outrank the IaC allocation.
   dns_ip_pool = try([
-    for h in local.hosts : h.ip_pool
+    for h in try(local.infra.hosts, []) : h.ip_pool
     if contains(try(h.services, []), "dns")
   ][0], { start = "", end = "" })
 
