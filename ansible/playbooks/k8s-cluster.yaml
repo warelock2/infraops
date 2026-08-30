@@ -375,6 +375,16 @@
           sed -i '/CALICO_IPV6POOL_CIDR/a\            - name: WIREGUARD_ENABLED\n              value: "true"' /tmp/calico.yaml
       when: inventory_hostname == cp_leader
 
+    - name: Wait for API server to be ready
+      ansible.builtin.command:
+        cmd: kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes --request-timeout=5s
+      register: _api_check
+      until: _api_check.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+      when: inventory_hostname == cp_leader
+
     - name: Install Calico CNI
       ansible.builtin.command:
         cmd: kubectl --kubeconfig /etc/kubernetes/admin.conf apply --validate=false -f /tmp/calico.yaml
