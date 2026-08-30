@@ -220,9 +220,11 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   # If nothing was created or replaced, no VM will signal — nothing to wait for
   if [ -z "$EXPECTED_VMS" ]; then
     echo "=== NO NEW VMs - skipping readiness wait ==="
+    echo "[DEBUG] apply-wait NO-NEW-VMS: ready=true, terraform_drifted='${DRIFTED_VMS}'"
     set_output "ready=true"
     set_output "failed_vms="
     set_output "terraform_drifted=$DRIFTED_VMS"
+    echo "[DEBUG] apply-wait EMITTED(no-new-vms): ready=true terraform_drifted='${DRIFTED_VMS}' -> $GITHUB_OUTPUT"
     exit 0
   fi
 
@@ -232,9 +234,12 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   rm -f "$DECLARED_FAILURES_FILE"
   if EXPECTED_VMS="$EXPECTED_VMS" scripts/wait-for-readiness.sh "$READINESS_TIMEOUT"; then
     echo "=== ALL VMs READY ==="
+    echo "[DEBUG] apply-wait GATE PASSED: ready=true, failed_vms=, terraform_drifted='${DRIFTED_VMS}'"
+    echo "[DEBUG] apply-wait GITHUB_OUTPUT='${GITHUB_OUTPUT:-<unset>}'"
     set_output "ready=true"
     set_output "failed_vms="
     set_output "terraform_drifted=$DRIFTED_VMS"
+    echo "[DEBUG] apply-wait EMITTED: ready=true terraform_drifted='${DRIFTED_VMS}' -> $GITHUB_OUTPUT"
     exit 0
   fi
 

@@ -147,7 +147,7 @@ jobs:
           args: >
             sh -c "sh scripts/record-timing.sh plan &&
             sh scripts/terraform-init-retry.sh -chdir=terraform init &&
-            terraform -chdir=terraform plan -detailed-exitcode -no-color -input=false > /tmp/plan_output.txt 2>&1; PLAN_RC=\$?; if grep -q 'no change found for data.external.dns_alloc' /tmp/plan_output.txt; then echo 'plan_exit=2' >> \$GITHUB_OUTPUT; else echo \"plan_exit=\$PLAN_RC\" >> \$GITHUB_OUTPUT; fi; cat /tmp/plan_output.txt"
+            terraform -chdir=terraform plan -detailed-exitcode -no-color -input=false > /tmp/plan_output.txt 2>&1; PLAN_RC=\$?; if grep -q 'no change found for data.external.dns_alloc' /tmp/plan_output.txt; then echo 'plan_exit=2' >> \$GITHUB_OUTPUT; else echo \"plan_exit=\$PLAN_RC\" >> \$GITHUB_OUTPUT; fi; echo \"[DEBUG] plan STEP OUTPUT: plan_exit=\$PLAN_RC\"; cat /tmp/plan_output.txt"
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.MINIO_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.MINIO_SECRET_KEY }}
@@ -167,6 +167,7 @@ jobs:
             else
               echo 'changed=false' >> \$GITHUB_OUTPUT
             fi &&
+            echo \"[DEBUG] changes STEP OUTPUT: changed=\$([ \"\$PLAN_EXIT\" = \"2\" ] && echo true || echo false) (from plan_exit=\$PLAN_EXIT)\" &&
             echo \"Infrastructure changes detected: \$( [ \"\$PLAN_EXIT\" = \"2\" ] && echo true || echo false)\""
         env:
           PLAN_EXIT: ${{ steps.plan.outputs.plan_exit }}
@@ -180,7 +181,8 @@ jobs:
             sh -c "CLUSTERS=$(yq '.clusters | length' conf/infrastructure.yaml) &&
             echo \"has_clusters=$([ \"$CLUSTERS\" -gt 0 ] && echo true || echo false)\" >> $GITHUB_OUTPUT &&
             CM_TAGGED=$(yq '[.clusters[]?.enforcement[], .hosts[]?.enforcement[]] | any_c(. == \"configuration_management\")' conf/infrastructure.yaml) &&
-            echo \"has_config_management=$CM_TAGGED\" >> $GITHUB_OUTPUT"
+            echo \"has_config_management=$CM_TAGGED\" >> $GITHUB_OUTPUT &&
+            echo \"[DEBUG] clusters STEP OUTPUT: has_clusters=$([ \"$CLUSTERS\" -gt 0 ] && echo true || echo false) has_config_management=$CM_TAGGED (cluster count=$CLUSTERS)\""
 
       - name: Fix Terraform Dir Permissions
         if: github.ref == 'refs/heads/master'
@@ -276,7 +278,11 @@ jobs:
         uses: docker://forgejo.afobl.com/warelock/ci-base:latest
         with:
           args: >
-            sh -c "python3 scripts/generate-inventory.py --output ansible/inventory.json"
+            sh -c "echo \"[DEBUG] gated consumer INVENTORY sees: ready='${READY_GATE:-<unset>}' has_config_management='${HAS_CM_GATE:-<unset>}'\" &&
+            python3 scripts/generate-inventory.py --output ansible/inventory.json"
+        env:
+          READY_GATE: ${{ steps.apply-wait.outputs.ready }}
+          HAS_CM_GATE: ${{ steps.clusters.outputs.has_config_management }}
 
       - name: Configuration Management
         id: config-mgmt
