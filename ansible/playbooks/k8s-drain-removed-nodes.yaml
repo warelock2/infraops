@@ -98,7 +98,7 @@
       ansible.builtin.add_host:
         name: "{{ item }}"
         groups: departing_cp
-        ansible_host: "{{ hostvars['localhost'][item ~ '_ip'] | default(item ~ '_ip') }}"
+        ansible_host: "{{ hostvars['localhost'][(item.replace('k8s-', 'k8s_').replace('-control-', '_control_').replace('-', '_') ~ '_ip')] | default(hostvars['localhost'][item ~ '_ip'] | default(item ~ '_ip')) }}"
         ansible_user: ansible
         ansible_ssh_private_key_file: /tmp/ansible_key
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
@@ -109,7 +109,7 @@
       ansible.builtin.add_host:
         name: "{{ healthy_cp }}"
         groups: survivor_cp
-        ansible_host: "{{ hostvars['localhost'][healthy_cp ~ '_ip'] | default(healthy_cp ~ '_ip') }}"
+        ansible_host: "{{ hostvars['localhost'][(healthy_cp.replace('k8s-', 'k8s_').replace('-control-', '_control_').replace('-', '_') ~ '_ip')] | default(hostvars['localhost'][healthy_cp ~ '_ip'] | default(healthy_cp ~ '_ip')) }}"
         ansible_user: ansible
         ansible_ssh_private_key_file: /tmp/ansible_key
         ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10"
