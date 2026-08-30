@@ -162,14 +162,14 @@
         creates: /etc/haproxy/haproxy.cfg
       loop: "{{ cp_to_remove }}"
       register: _haproxy_strip
-      changed_when: "'changed' in _haproxy_strip.stdout"
+      changed_when: true
 
     - name: Validate and reload haproxy when backends changed
       ansible.builtin.command:
         cmd: sudo sh -c 'haproxy -c -f /etc/haproxy/haproxy.cfg >/dev/null && systemctl reload haproxy'
       when:
         - _haproxy_strip is defined
-        - _haproxy_strip.results | map(attribute='stdout') | select('search', 'changed') | list | length > 0
+        - _haproxy_strip.results | map(attribute='changed') | list | length > 0
 
     - name: Wait for the API endpoint to answer on the VIP
       ansible.builtin.wait_for:
