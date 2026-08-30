@@ -284,6 +284,7 @@
         "{{ playbook_dir }}/../../scripts/reconcile-kubeadm-config.py --kubeconfig /etc/kubernetes/admin.conf oidc-issuer-url={{ oidc_issuer_url }} oidc-client-id={{ oidc_client_id }} oidc-username-claim=preferred_username oidc-groups-claim=groups"
       register: kubeadm_config_reconcile
       changed_when: "'updated' in kubeadm_config_reconcile.stdout"
+      ignore_errors: true
       when: inventory_hostname == cp_leader
 
     - name: kubeadm join (additional control plane node)
