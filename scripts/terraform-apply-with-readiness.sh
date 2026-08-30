@@ -4,6 +4,25 @@ set -e
 export VAULT_ADDR="${VAULT_ADDR:-https://vault.afobl.com}"
 export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-true}"
 
+# Write a key=value line to the CI runner's GITHUB_OUTPUT. A failed or missing
+# output target must NEVER fail the step: under `set -e` an unguarded
+# `>> "$GITHUB_OUTPUT"` abort (with no stderr) right after the readiness gate
+# was crashing the whole run, which skipped configuration management and left
+# the cluster half-configured. Emit a warning instead so the problem stays
+# visible in the log without taking the pipeline down.
+set_output() {
+  case "${GITHUB_OUTPUT:-}" in
+    "")
+      echo "WARNING: GITHUB_OUTPUT is unset; could not emit output '$1'" >&2
+      return 0
+      ;;
+  esac
+  if ! echo "$1" >> "$GITHUB_OUTPUT" 2>/dev/null; then
+    echo "WARNING: could not write output '$1' to $GITHUB_OUTPUT" >&2
+  fi
+  return 0
+}
+
 MAX_RETRIES=3
 READINESS_TIMEOUT=1200
 PLAN_FILE=/tmp/tfplan
@@ -79,9 +98,9 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
       echo "Plan: no changes."
       EXPECTED_VMS=""
       DRIFTED_VMS=""
-      echo "ready=true" >> "$GITHUB_OUTPUT"
-      echo "failed_vms=" >> "$GITHUB_OUTPUT"
-      echo "terraform_drifted=" >> "$GITHUB_OUTPUT"
+      set_output "ready=true"
+      set_output "failed_vms="
+      set_output "terraform_drifted="
       exit 0
       ;;
     2)
@@ -163,9 +182,9 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
         echo "Plan after cleanup: no changes."
         EXPECTED_VMS=""
         DRIFTED_VMS=""
-        echo "ready=true" >> "$GITHUB_OUTPUT"
-        echo "failed_vms=" >> "$GITHUB_OUTPUT"
-        echo "terraform_drifted=" >> "$GITHUB_OUTPUT"
+        set_output "ready=true"
+        set_output "failed_vms="
+        set_output "terraform_drifted="
         exit 0
         ;;
       2)
@@ -201,9 +220,9 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   # If nothing was created or replaced, no VM will signal — nothing to wait for
   if [ -z "$EXPECTED_VMS" ]; then
     echo "=== NO NEW VMs - skipping readiness wait ==="
-    echo "ready=true" >> "$GITHUB_OUTPUT"
-    echo "failed_vms=" >> "$GITHUB_OUTPUT"
-    echo "terraform_drifted=$DRIFTED_VMS" >> "$GITHUB_OUTPUT"
+    set_output "ready=true"
+    set_output "failed_vms="
+    set_output "terraform_drifted=$DRIFTED_VMS"
     exit 0
   fi
 
@@ -213,9 +232,9 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
   rm -f "$DECLARED_FAILURES_FILE"
   if EXPECTED_VMS="$EXPECTED_VMS" scripts/wait-for-readiness.sh "$READINESS_TIMEOUT"; then
     echo "=== ALL VMs READY ==="
-    echo "ready=true" >> "$GITHUB_OUTPUT"
-    echo "failed_vms=" >> "$GITHUB_OUTPUT"
-    echo "terraform_drifted=$DRIFTED_VMS" >> "$GITHUB_OUTPUT"
+    set_output "ready=true"
+    set_output "failed_vms="
+    set_output "terraform_drifted=$DRIFTED_VMS"
     exit 0
   fi
 
@@ -235,8 +254,8 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
       VMID="${entry##*:}"
       echo "PRESERVING $HOSTNAME (VMID $VMID) - not destroying, left in place for forensics"
     done
-    echo "ready=false" >> "$GITHUB_OUTPUT"
-    echo "failed_vms=$ALL_BOTCHED" >> "$GITHUB_OUTPUT"
+    set_output "ready=false"
+    set_output "failed_vms=$ALL_BOTCHED"
     exit 1
   fi
 
@@ -265,6 +284,6 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
 done
 
 echo "=== MAX RETRIES REACHED ==="
-echo "ready=false" >> "$GITHUB_OUTPUT"
-echo "failed_vms=$FAILED_VMS" >> "$GITHUB_OUTPUT"
+set_output "ready=false"
+set_output "failed_vms=$FAILED_VMS"
 exit 1

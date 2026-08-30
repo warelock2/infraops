@@ -26,6 +26,25 @@ set -e
 export VAULT_ADDR="${VAULT_ADDR:-https://vault.afobl.com}"
 export VAULT_SKIP_VERIFY="${VAULT_SKIP_VERIFY:-true}"
 
+# Write a key=value line to the CI runner's GITHUB_OUTPUT. A failed or missing
+# output target must NEVER fail the step: under `set -e` an unguarded
+# `>> "$GITHUB_OUTPUT"` abort (with no stderr) right after the readiness handshake
+# was crashing the whole run, which skipped configuration management and left the
+# cluster half-configured. Emit a warning instead so the problem stays visible in
+# the log without taking the pipeline down.
+set_output() {
+  case "${GITHUB_OUTPUT:-}" in
+    "")
+      echo "WARNING: GITHUB_OUTPUT is unset; could not emit output '$1'" >&2
+      return 0
+      ;;
+  esac
+  if ! echo "$1" >> "$GITHUB_OUTPUT" 2>/dev/null; then
+    echo "WARNING: could not write output '$1' to $GITHUB_OUTPUT" >&2
+  fi
+  return 0
+}
+
 # Accept timeout as first argument, default 1200s (20 min)
 READINESS_TIMEOUT="${1:-1200}"
 
@@ -233,8 +252,8 @@ while true; do
       VMID=$(echo "$ENTRY" | cut -d: -f2)
       echo "DECLARED FAILURE: $FHOSTNAME (VMID $VMID) — halting production line, leaving VM in place"
       echo "$FHOSTNAME:$VMID" >> /tmp/declared_failed_vms.txt
-      echo "declared_failed_vms=$FHOSTNAME:$VMID" >> "$GITHUB_OUTPUT"
-      echo "ready=false" >> "$GITHUB_OUTPUT"
+      set_output "declared_failed_vms=$FHOSTNAME:$VMID"
+      set_output "ready=false"
       exit 1
     fi
   done || true
@@ -250,7 +269,7 @@ while true; do
 
   if [ "$ALL_READY" = "true" ]; then
     echo "ALL VMs READY"
-    echo "ready=true" >> "$GITHUB_OUTPUT"
+    set_output "ready=true"
     exit 0
   fi
 
@@ -266,7 +285,7 @@ while true; do
 done
 
 echo "TIMEOUT: some VMs did not declare readiness"
-echo "ready=false" >> "$GITHUB_OUTPUT"
+set_output "ready=false"
 
 FAILED_VMS=""
 for entry in $EXPECTED_VMS; do
@@ -277,6 +296,6 @@ for entry in $EXPECTED_VMS; do
     FAILED_VMS="$FAILED_VMS $HOSTNAME:$VMID"
   fi
 done
-echo "failed_vms=$FAILED_VMS" >> "$GITHUB_OUTPUT"
+set_output "failed_vms=$FAILED_VMS"
 echo "$FAILED_VMS" > /tmp/failed_vms.txt
 exit 1
