@@ -223,7 +223,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     echo "[DEBUG] apply-wait NO-NEW-VMS: ready=true, terraform_drifted='${DRIFTED_VMS}'"
     set_output "ready=true"
     set_output "failed_vms="
-    set_output "terraform_drifted=$DRIFTED_VMS"
+    set_output "terraform_drifted=$(echo "$DRIFTED_VMS" | tr '\n' ' ')"
     echo "[DEBUG] apply-wait EMITTED(no-new-vms): ready=true terraform_drifted='${DRIFTED_VMS}' -> $GITHUB_OUTPUT"
     exit 0
   fi
@@ -238,7 +238,7 @@ for RETRY in $(seq 1 "$MAX_RETRIES"); do
     echo "[DEBUG] apply-wait GITHUB_OUTPUT='${GITHUB_OUTPUT:-<unset>}'"
     set_output "ready=true"
     set_output "failed_vms="
-    set_output "terraform_drifted=$DRIFTED_VMS"
+    set_output "terraform_drifted=$(echo "$DRIFTED_VMS" | tr '\n' ' ')"
     echo "[DEBUG] apply-wait EMITTED: ready=true terraform_drifted='${DRIFTED_VMS}' -> $GITHUB_OUTPUT"
     exit 0
   fi
