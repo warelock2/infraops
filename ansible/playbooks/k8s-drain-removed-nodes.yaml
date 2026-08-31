@@ -209,51 +209,18 @@
         msg: "healthy_cp resolved to empty string (no surviving control plane found to remove etcd members from)"
       when: healthy_cp == '' and cp_to_remove | length > 0
 
-    - name: DEBUG — list scripts directory and check remove-etcd-member.sh existence
-      ansible.builtin.command:
-        cmd: "ls /workspace/warelock/infraops/ansible/scripts/"
-      changed_when: false
-      register: debug_scripts_list
-      run_once: true
-      delegate_to: localhost
-      ignore_errors: true
-
-    - name: DEBUG — report scripts directory listing
-      ansible.builtin.debug:
-        msg: "Scripts in ansible/scripts/: {{ debug_scripts_list.stdout_lines | default(['NO OUTPUT']) }}"
-      run_once: true
-      delegate_to: localhost
-
-    - name: DEBUG — check if kubectl is available
-      ansible.builtin.shell:
-        cmd: "which kubectl 2>&1; kubectl version --client 2>&1 | head -1; echo '---'; ls /usr/local/bin/kubectl 2>&1"
-      changed_when: false
-      register: debug_kubectl
-      run_once: true
-      delegate_to: localhost
-      ignore_errors: true
-
-    - name: DEBUG — report kubectl availability
-      ansible.builtin.debug:
-        msg: "kubectl: {{ debug_kubectl.stdout_lines | default(['NOT AVAILABLE']) }}"
-      run_once: true
-      delegate_to: localhost
-
-    - name: DEBUG — show playbook_dir value
-      ansible.builtin.debug:
-        msg: "playbook_dir={{ playbook_dir }}"
-      run_once: true
-      delegate_to: localhost
-
     - name: Remove etcd members for removed control planes
-      ansible.builtin.shell:
-        cmd: "/workspace/warelock/infraops/ansible/scripts/remove-etcd-member.sh {{ item }} {{ healthy_cp }}"
+      ansible.builtin.command:
+        cmd: "{{ playbook_dir }}/../scripts/remove-etcd-member.sh {{ item }} {{ healthy_cp }}"
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
+      # NOT ignore_errors: a failed etcd member removal must fail the run loudly
+      # rather than silently leaving the departing member in the datastore's
+      # membership with auto-compaction counting it toward quorum.
 
     - name: Verify surviving etcd member count matches desired control plane count
       ansible.builtin.command:
-        cmd: "/workspace/warelock/infraops/ansible/scripts/check-etcd-members.sh {{ desired_cp_count }} {{ healthy_cp }}"
+        cmd: "{{ playbook_dir }}/../scripts/check-etcd-members.sh {{ desired_cp_count }} {{ healthy_cp }}"
       when: cp_to_remove | length > 0
 
     - name: Delete removed worker nodes
