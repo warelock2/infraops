@@ -225,8 +225,8 @@
       delegate_to: localhost
 
     - name: DEBUG — check if kubectl is available
-      ansible.builtin.command:
-        cmd: "which kubectl && kubectl version --client 2>&1 | head -1 || echo 'kubectl not found'"
+      ansible.builtin.shell:
+        cmd: "which kubectl 2>&1; kubectl version --client 2>&1 | head -1; echo '---'; ls /usr/local/bin/kubectl 2>&1"
       changed_when: false
       register: debug_kubectl
       run_once: true
