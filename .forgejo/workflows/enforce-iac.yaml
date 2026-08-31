@@ -298,6 +298,25 @@ jobs:
           VAULT_TOKEN: ${{ secrets.VAULT_RO_TOKEN }}
 
       # ---------------------------------------------------------------------
+      # CLUSTER HEALTH GATE. `kubectl wait ... nodes --all` inside site.yaml
+      # only ensures the nodes that EXIST are Ready - it does NOT check the
+      # node set matches infrastructure.yaml. A partial/aborted bootstrap
+      # (e.g. run #848 where only some control nodes came up) passes that
+      # wait and leaves a broken half-cluster silently in place. This step
+      # recomputes the DESIRED node set from the SSOT and fails loudly if the
+      # live cluster diverges, so a broken cluster is never reported healthy.
+      # ---------------------------------------------------------------------
+      - name: Cluster Health Gate
+        if: github.ref == 'refs/heads/master' && steps.clusters.outputs.has_config_management == 'true' && steps.apply-wait.outputs.ready == 'true'
+        uses: docker://forgejo.afobl.com/warelock/ci-base:latest
+        with:
+          args: >
+            sh -c "sh scripts/record-timing.sh cluster-health &&
+            sh scripts/check-cluster-health.sh"
+        env:
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+
+      # ---------------------------------------------------------------------
       # Build and park standby VMs. Runs AFTER config management (normal nodes
       # are done first). Only freshly-created standby VMs are running; parked
       # ones are stopped and skipped. Running ghosts are built like any other

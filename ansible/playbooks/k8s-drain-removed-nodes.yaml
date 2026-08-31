@@ -189,6 +189,7 @@
     nodes_to_remove: "{{ hostvars['localhost']['nodes_to_remove'] }}"
     current_nodes: "{{ hostvars['localhost']['current_nodes'] }}"
     healthy_cp: "{{ hostvars['localhost']['healthy_cp'] | default('') }}"
+    desired_cp_count: "{{ (hostvars['localhost']['desired_nodes'] | select('search', 'control') | list) | length }}"
   tasks:
     - name: Drain removed worker nodes
       ansible.builtin.command:
@@ -204,12 +205,24 @@
       when: cp_to_remove | length > 0
       ignore_errors: true
 
+    - name: Detect duplicate healthy control plane name (safety check)
+      ansible.builtin.fail:
+        msg: "healthy_cp resolved to empty string (no surviving control plane found to remove etcd members from)"
+      when: healthy_cp == '' and cp_to_remove | length > 0
+
     - name: Remove etcd members for removed control planes
       ansible.builtin.command:
         cmd: "{{ playbook_dir }}/../scripts/remove-etcd-member.sh {{ item }} {{ healthy_cp }}"
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
-      ignore_errors: true
+      # NOT ignore_errors: a failed etcd member removal must fail the run loudly
+      # rather than silently leaving the departing member in the datastore's
+      # membership with auto-compaction counting it toward quorum.
+
+    - name: Verify surviving etcd member count matches desired control plane count
+      ansible.builtin.command:
+        cmd: "{{ playbook_dir }}/../scripts/check-etcd-members.sh {{ desired_cp_count }} {{ healthy_cp }}"
+      when: cp_to_remove | length > 0
 
     - name: Delete removed worker nodes
       ansible.builtin.command:
@@ -240,3 +253,50 @@
       ansible.builtin.debug:
         msg: "No nodes need draining. Cluster is in desired state."
       when: nodes_to_remove | length == 0
+
+# ---------------------------------------------------------------------------
+# Play 5 — Teardown the departing control plane hosts (the missing official
+# step). The kubeadm docs ("Remove the node / Clean up the control plane")
+# mandate `kubeadm reset` on the removed control-plane host so the static-pod
+# apiserver, controller-manager, scheduler, local kubelet and local etcd are
+# actually stopped and cleaned up. Without this the departing host keeps
+# running a "zombie" apiserver that stays listening on the VIP (was mitigated
+# only by demoting keepalived/haproxy in Play 2). 
+#
+# This runs AFTER Play 4 has drained the node, removed its etcd member from a
+# surviving member (quorum committed) and deleted the Node object, so tearing
+# down the host here cannot disturb the surviving cluster. Failures are LOUD:
+# a reset that fails means the host still holds cluster state and the run
+# must not report success.
+# ---------------------------------------------------------------------------
+- name: K8s Drain Removed Nodes — Teardown Departing Control Planes
+  hosts: departing_cp
+  gather_facts: false
+  ignore_unreachable: true
+  vars:
+    cp_to_remove: "{{ hostvars['localhost']['cp_to_remove'] }}"
+  tasks:
+    - name: Reset kubeadm state on departing control plane host
+      ansible.builtin.command:
+        cmd: kubeadm reset -f
+        timeout: 300
+      become: true
+      register: _reset
+      ignore_errors: true
+      changed_when: _reset.rc == 0
+
+    - name: Report kubeadm reset failure (host may already be destroyed)
+      ansible.builtin.debug:
+        msg: "kubeadm reset failed on this departing control plane (rc={{ _reset.rc }}). If the VM was already destroyed this is expected; if it still exists it must be reset manually before reuse."
+      when: _reset.rc != 0 and _reset.rc is defined
+
+    - name: Stop lingering control plane services if kubeadm reset left them
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      become: true
+      loop:
+        - kubelet
+        - etcd
+      ignore_errors: true
