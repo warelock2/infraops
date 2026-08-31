@@ -211,8 +211,16 @@
 
     - name: DEBUG — list scripts directory and check remove-etcd-member.sh existence
       ansible.builtin.command:
-        cmd: "sh -c 'ls -1 {{ playbook_dir }}/../scripts/ && test -f {{ playbook_dir }}/../scripts/remove-etcd-member.sh && echo EXISTS || echo MISSING'"
+        cmd: "ls /workspace/warelock/infraops/ansible/scripts/"
       changed_when: false
+      register: debug_scripts_list
+      run_once: true
+      delegate_to: localhost
+      ignore_errors: true
+
+    - name: DEBUG — report scripts directory listing
+      ansible.builtin.debug:
+        msg: "Scripts in ansible/scripts/: {{ debug_scripts_list.stdout_lines | default(['NO OUTPUT']) }}"
       run_once: true
       delegate_to: localhost
 
