@@ -258,6 +258,43 @@
         path: /etc/kubernetes/admin.conf
       register: k8s_admin_conf
 
+    - name: Check if API server is actually responding
+      ansible.builtin.command:
+        cmd: kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes --request-timeout=5s
+      register: _api_alive
+      ignore_errors: true
+      changed_when: false
+      when: inventory_hostname == cp_leader and k8s_admin_conf.stat.exists
+
+    - name: Reset broken cluster state so kubeadm init can re-run
+      ansible.builtin.command:
+        cmd: kubeadm reset --force
+      changed_when: true
+      when:
+        - inventory_hostname == cp_leader
+        - k8s_admin_conf.stat.exists
+        - _api_alive is failed
+      ignore_errors: true
+
+    - name: Remove stale admin.conf after reset
+      ansible.builtin.file:
+        path: /etc/kubernetes/admin.conf
+        state: absent
+      when:
+        - inventory_hostname == cp_leader
+        - k8s_admin_conf.stat.exists
+        - _api_alive is failed
+      ignore_errors: true
+
+    - name: Re-check admin.conf after reset
+      ansible.builtin.stat:
+        path: /etc/kubernetes/admin.conf
+      register: k8s_admin_conf
+      when:
+        - inventory_hostname == cp_leader
+        - k8s_admin_conf.stat.exists
+        - _api_alive is failed
+
     - name: Pull kubeadm config images
       ansible.builtin.command:
         cmd: kubeadm config images pull --config /tmp/kubeadm-config.yaml
