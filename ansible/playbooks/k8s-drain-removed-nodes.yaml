@@ -224,33 +224,18 @@
       run_once: true
       delegate_to: localhost
 
-    - name: DEBUG — file stat for remove-etcd-member.sh
+    - name: DEBUG — check if kubectl is available
       ansible.builtin.command:
-        cmd: "ls -la /workspace/warelock/infraops/ansible/scripts/remove-etcd-member.sh && stat /workspace/warelock/infraops/ansible/scripts/remove-etcd-member.sh"
+        cmd: "which kubectl && kubectl version --client 2>&1 | head -1 || echo 'kubectl not found'"
       changed_when: false
-      register: debug_file_stat
+      register: debug_kubectl
       run_once: true
       delegate_to: localhost
       ignore_errors: true
 
-    - name: DEBUG — report file stat
+    - name: DEBUG — report kubectl availability
       ansible.builtin.debug:
-        msg: "File stat: {{ debug_file_stat.stdout_lines | default(['NO OUTPUT']) }}"
-      run_once: true
-      delegate_to: localhost
-
-    - name: DEBUG — try running script directly
-      ansible.builtin.command:
-        cmd: "/workspace/warelock/infraops/ansible/scripts/remove-etcd-member.sh"
-      changed_when: false
-      register: debug_run
-      run_once: true
-      delegate_to: localhost
-      ignore_errors: true
-
-    - name: DEBUG — report script run result
-      ansible.builtin.debug:
-        msg: "Direct run rc={{ debug_run.rc | default('NONE') }} stderr={{ debug_run.stderr | default('NONE') }} stdout={{ debug_run.stdout | default('NONE') }}"
+        msg: "kubectl: {{ debug_kubectl.stdout_lines | default(['NOT AVAILABLE']) }}"
       run_once: true
       delegate_to: localhost
 
