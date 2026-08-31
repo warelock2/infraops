@@ -211,7 +211,7 @@
 
     - name: DEBUG — list scripts directory and check remove-etcd-member.sh existence
       ansible.builtin.command:
-        cmd: "{{ playbook_dir }}/../scripts/remove-etcd-member.sh test -f {{ playbook_dir }}/../scripts/remove-etcd-member.sh && echo EXISTS || echo MISSING && ls {{ playbook_dir }}/../scripts/ 2>/dev/null | head -1"
+        cmd: "sh -c 'ls -1 {{ playbook_dir }}/../scripts/ && test -f {{ playbook_dir }}/../scripts/remove-etcd-member.sh && echo EXISTS || echo MISSING'"
       changed_when: false
       run_once: true
       delegate_to: localhost
