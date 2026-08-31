@@ -239,18 +239,21 @@
       run_once: true
       delegate_to: localhost
 
+    - name: DEBUG — show playbook_dir value
+      ansible.builtin.debug:
+        msg: "playbook_dir={{ playbook_dir }}"
+      run_once: true
+      delegate_to: localhost
+
     - name: Remove etcd members for removed control planes
       ansible.builtin.command:
-        cmd: "{{ playbook_dir }}/../scripts/remove-etcd-member.sh {{ item }} {{ healthy_cp }}"
+        cmd: "/workspace/warelock/infraops/ansible/scripts/remove-etcd-member.sh {{ item }} {{ healthy_cp }}"
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
-      # NOT ignore_errors: a failed etcd member removal must fail the run loudly
-      # rather than silently leaving the departing member in the datastore's
-      # membership with auto-compaction counting it toward quorum.
 
     - name: Verify surviving etcd member count matches desired control plane count
       ansible.builtin.command:
-        cmd: "{{ playbook_dir }}/../scripts/check-etcd-members.sh {{ desired_cp_count }} {{ healthy_cp }}"
+        cmd: "/workspace/warelock/infraops/ansible/scripts/check-etcd-members.sh {{ desired_cp_count }} {{ healthy_cp }}"
       when: cp_to_remove | length > 0
 
     - name: Delete removed worker nodes
