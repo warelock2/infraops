@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Add k8s apt key
 K8S_MAJOR_MINOR="$1"
 mkdir -p /etc/apt/keyrings &&

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Verify the surviving etcd cluster is healthy and its member count matches the
 # desired number of control-plane nodes after a shrink. Runs against a known
 # healthy (surviving) control-plane's local etcd, mirroring remove-etcd-member.sh.

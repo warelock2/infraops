@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Configure containerd with SystemdCgroup
 K8S_IMAGE_REPOSITORY="{{ k8s_image_repository }}"
 mkdir -p /etc/containerd &&

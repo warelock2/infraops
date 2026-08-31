@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Wait for local API server to become healthy
 NODE_IP="$1"
 INVENTORY_HOSTNAME="${2:-unknown}"

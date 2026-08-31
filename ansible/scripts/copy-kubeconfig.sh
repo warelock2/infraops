@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Copy admin kubeconfig to a user's .kube directory
 ADMIN_USER="$1"
 ADMIN_GROUP="$2"
