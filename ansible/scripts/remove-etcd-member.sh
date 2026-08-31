@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Remove etcd member for a removed control plane node
 set -e
 
