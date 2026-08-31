@@ -246,7 +246,7 @@
       delegate_to: localhost
 
     - name: Remove etcd members for removed control planes
-      ansible.builtin.command:
+      ansible.builtin.shell:
         cmd: "/workspace/warelock/infraops/ansible/scripts/remove-etcd-member.sh {{ item }} {{ healthy_cp }}"
       loop: "{{ cp_to_remove }}"
       when: cp_to_remove | length > 0
