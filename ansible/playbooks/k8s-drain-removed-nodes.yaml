@@ -209,6 +209,13 @@
         msg: "healthy_cp resolved to empty string (no surviving control plane found to remove etcd members from)"
       when: healthy_cp == '' and cp_to_remove | length > 0
 
+    - name: DEBUG — list scripts directory and check remove-etcd-member.sh existence
+      ansible.builtin.command:
+        cmd: "ls -la {{ playbook_dir }}/../scripts/ && test -f {{ playbook_dir }}/../scripts/remove-etcd-member.sh && echo EXISTS || echo MISSING && pwd"
+      changed_when: false
+      run_once: true
+      delegate_to: localhost
+
     - name: Remove etcd members for removed control planes
       ansible.builtin.command:
         cmd: "{{ playbook_dir }}/../scripts/remove-etcd-member.sh {{ item }} {{ healthy_cp }}"
