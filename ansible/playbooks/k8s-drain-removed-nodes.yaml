@@ -125,7 +125,6 @@
     - name: Check if departing control plane is reachable
       ansible.builtin.wait_for_connection:
         timeout: 10
-      delegate_to: localhost
       register: cp_reachable
       ignore_errors: true
 
