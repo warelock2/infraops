@@ -290,10 +290,6 @@
       ansible.builtin.stat:
         path: /etc/kubernetes/admin.conf
       register: k8s_admin_conf
-      when:
-        - inventory_hostname == cp_leader
-        - k8s_admin_conf.stat.exists
-        - _api_alive is failed
 
     - name: Pull kubeadm config images
       ansible.builtin.command:
