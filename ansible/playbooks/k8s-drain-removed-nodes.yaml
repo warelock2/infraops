@@ -281,13 +281,13 @@
         timeout: 300
       become: true
       register: _reset
-      ignore_errors: true
-      changed_when: _reset.rc == 0
+      failed_when: false
+      changed_when: false
 
     - name: Report kubeadm reset failure (host may already be destroyed)
       ansible.builtin.debug:
-        msg: "kubeadm reset failed on this departing control plane (rc={{ _reset.rc }}). If the VM was already destroyed this is expected; if it still exists it must be reset manually before reuse."
-      when: _reset.rc != 0 and _reset.rc is defined
+        msg: "kubeadm reset failed on this departing control plane (rc={{ _reset.rc | default('unreachable') }}). If the VM was already destroyed this is expected; if it still exists it must be reset manually before reuse."
+      when: (_reset.rc | default(1)) != 0
 
     - name: Stop lingering control plane services if kubeadm reset left them
       ansible.builtin.systemd:
